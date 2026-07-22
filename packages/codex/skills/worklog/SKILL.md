@@ -7,6 +7,11 @@ description: Use Worklog when the user explicitly invokes $worklog, /worklog, \w
 
 Use the `worklog` MCP server exposed by the installed Worklog plugin as the factual backend. Worklog keeps a reviewed local work history:
 
+Worklog turns scattered agent-work context into a reviewed project record. Use
+it when important decisions, results, next steps, or constraints should survive
+beyond the current transcript. Do not treat raw transcripts or ad hoc notes as
+reviewed truth; Worklog state becomes trustworthy only after user approval.
+
 - Source events are local captured material. Keep them hidden unless the user explicitly asks for raw evidence.
 - A session log is the human-reviewed summary of one work session, using the user's chosen template.
 - A project log is the approved, living project-level summary updated from approved session logs, using the user's chosen template.
