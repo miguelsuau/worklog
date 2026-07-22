@@ -29,6 +29,36 @@ Worklog is built around four core concepts:
 
 Worklog does not ship predefined legal, medical, engineering, or research templates. The assistant proposes a structure from the nature of the project, then stores only the user-approved templates.
 
+## Sharing
+
+Worklog can be used for local-only projects or shared projects. The sharing
+rule is deliberately conservative: draft session logs and draft project logs
+stay local, and only approved artifacts are published to the selected shared
+backend.
+
+For shared projects, the assistant should guide setup in stages:
+
+1. Ask whether the project should be shared.
+2. Ask the user to choose a storage provider, such as Google Drive, Dropbox,
+   OneDrive, a network folder, a Docker-mounted folder, GitHub, GitLab,
+   Bitbucket, or a local Git repository.
+3. Build or inspect the selected provider setup.
+4. Suggest provider-specific paths or repositories.
+5. Configure the project only after the user confirms the provider and
+   location.
+
+Worklog also separates project roles:
+
+- Contributors can create drafts and approve/publish their own session logs.
+- Project approvers can approve/publish project logs.
+- Maintainers can change templates, sharing configuration, and permissions.
+
+Worklog stores its own membership policy, but shared projects also need matching
+backend permissions. Agents should apply provider permissions directly when an
+authenticated connector, API, browser, admin tool, or desktop sync surface can
+do it. If no available tool can complete the backend permission change, the
+agent should ask the user to apply that provider permission manually.
+
 ## Private Beta
 
 The implementation lives once in `src/worklog`. The skill instructions live
@@ -111,9 +141,10 @@ Worklog stores reviewed logs locally, and shared projects may publish approved l
 
 When reporting bugs, include:
 
-- agent app and version
-- operating system
+- agent host and version, such as Claude Code, Codex, or ChatGPT
+- model used
+- operating system and relevant local setup, especially for paths, permissions, sync clients, or containers
 - command or prompt used
 - expected behavior
 - actual behavior
-- whether the project was local-only or shared
+- whether the project was local-only or shared, including the storage provider for shared projects
