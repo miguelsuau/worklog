@@ -20,11 +20,11 @@ user-approved session log, and project logs are updated only from approved
 session logs. Future agents can resume from the approved record without
 treating an unreviewed transcript or ad hoc note as truth.
 
-Collaboration adds another dimension to this problem. Teams usually share the
-outputs of agent work, such as code, documents, notebooks, tickets, or reports,
-but the context behind those outputs often stays in one person's local chat:
-what was tried, why decisions were made, which constraints were discovered, and
-what should happen next. Shared Worklog projects turn that hidden context into a
+On teams, the same need shows up across people. Teams usually share the outputs
+of agent work, such as code, documents, notebooks, tickets, or reports, but the
+context behind those outputs often stays in one person's local chat: what was
+tried, why decisions were made, which constraints were discovered, and what
+should happen next. Shared Worklog projects turn that hidden context into a
 reviewed team record, making handoffs easier, reducing repeated discovery, and
 giving future agents the same approved facts without publishing raw transcripts
 or unfinished drafts.
