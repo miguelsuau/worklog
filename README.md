@@ -72,11 +72,10 @@ agent should ask the user to apply that provider permission manually.
 
 ## Private Beta
 
-The implementation lives once in `src/worklog`. The skill instructions live
-once in `skill/worklog.body.md`; `scripts/generate_skills.py` renders the
-host-specific Claude and Codex `SKILL.md` files with only frontmatter and
-invocation wording changed. The Claude and Codex packages are thin wrappers;
-`scripts/build_packages.sh` copies the shared source into each package's
+The implementation lives once in `src/worklog`. The skill instructions,
+metadata, and MCP launcher also have single shared sources. The Claude and
+Codex packages are generated thin wrappers; `scripts/build_packages.sh` renders
+host-specific package files and copies the shared source into each package's
 ignored `lib/` directory before installation.
 
 ```text
@@ -85,7 +84,16 @@ src/worklog/
 
 skill/
   worklog.body.md
+
+launcher/
+  worklog_mcp_server.py
+
+plugin.metadata.json
 ```
+
+Generated package files are committed for easy beta installs.
+`scripts/verify_package.sh` fails if generated package files drift from their
+shared sources.
 
 The host-specific packages are:
 
