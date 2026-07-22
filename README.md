@@ -2,9 +2,9 @@
 
 Worklog is a local MCP-backed project context tool for agent-assisted work.
 
-It keeps a deliberately small model:
+Worklog is built around four core concepts:
 
-- Source events are raw captured material and stay local by default.
+- Source events are the raw captured activity from a work session and stay local by default.
 - Session logs are human-reviewed summaries of one work session.
 - Project logs are approved, living project-level state.
 - Resume context is generated from approved project logs and recent approved session logs.
