@@ -6,7 +6,7 @@ Worklog is built around four core concepts:
 
 - Source events are the raw captured activity from a work session and stay local by default.
 - Session logs are human-reviewed summaries of one work session.
-- Project logs are approved, living project-level state.
+- Project logs are approved, living project-level summaries updated from approved session logs.
 - Resume context is generated from approved project logs and recent approved session logs.
 
 Worklog does not ship predefined legal, medical, engineering, or research templates. The assistant proposes a structure from the nature of the project, then stores only the user-approved templates.
