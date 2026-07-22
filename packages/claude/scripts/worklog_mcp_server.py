@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Claude Worklog MCP launcher.
+"""Worklog MCP launcher for host integration packages.
 
 The implementation lives in src/worklog during development and is copied into
-this package's lib/ directory by scripts/build_packages.sh for installation.
+each package's lib/ directory by scripts/build_packages.sh for installation.
 """
 
 from __future__ import annotations
@@ -12,8 +12,15 @@ import sys
 from pathlib import Path
 
 
+def repo_root_for(script: Path) -> Path:
+    if script.parent.name == "launcher":
+        return script.parents[1]
+    return script.parents[3]
+
+
 def add_worklog_source() -> None:
     script = Path(__file__).resolve()
+    repo_root = repo_root_for(script)
     candidates: list[Path] = []
 
     if os.environ.get("WORKLOG_REPO_ROOT"):
@@ -22,7 +29,7 @@ def add_worklog_source() -> None:
     candidates.extend(
         [
             script.parents[1] / "lib",
-            script.parents[3] / "src",
+            repo_root / "src",
         ]
     )
 
