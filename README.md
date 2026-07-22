@@ -9,9 +9,10 @@ constraints, results, and next steps are mixed with raw commands, tool output,
 and back-and-forth, so the signal is easy to lose.
 
 Many agent-assisted projects try to preserve that signal in notes, issue
-comments, scratch reports, generated files, and other tool-specific project
-docs. That context can be valuable, but it is usually informal, scattered
-across tools, and only partly reviewed.
+comments, scratch reports, generated files, and tool-specific project docs (for
+example, Codex's `AGENTS.md`, Claude Code's `CLAUDE.md`, or a project
+`memory.md`). That context can be valuable, but it is usually informal,
+scattered across tools, and only partly reviewed.
 
 Worklog turns that scattered context into a structured, human-reviewed project
 record. Source events stay local by default, each session becomes a
