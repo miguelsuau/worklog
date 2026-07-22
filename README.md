@@ -18,7 +18,9 @@ Worklog turns that scattered context into a structured, human-reviewed project
 record. Source events stay local by default, each session becomes a
 user-approved session log, and project logs are updated only from approved
 session logs. Future agents can resume from the approved record without
-treating an unreviewed transcript or ad hoc note as truth.
+treating an unreviewed transcript or ad hoc note as truth. For teams, sharing
+matters because coworkers can build from the same approved project record
+without exposing raw transcripts or unfinished drafts.
 
 Worklog is built around four core concepts:
 
