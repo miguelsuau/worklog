@@ -20,7 +20,7 @@ user-approved session log, and project logs are updated only from approved
 session logs. Future agents can resume from the approved record without
 treating an unreviewed transcript or ad hoc note as truth.
 
-Collaboration adds another version of this problem. Teams usually share the
+Collaboration adds another dimension to this problem. Teams usually share the
 outputs of agent work, such as code, documents, notebooks, tickets, or reports,
 but the context behind those outputs often stays in one person's local chat:
 what was tried, why decisions were made, which constraints were discovered, and
