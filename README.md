@@ -68,7 +68,7 @@ $worklog
 
 ## Beta Testing Notes
 
-Do not use Worklog for sensitive client, patient, legal, or confidential material unless you understand where your local and shared Worklog files are stored.
+Worklog stores reviewed logs locally, and shared projects may publish approved logs to a shared folder or repository. For sensitive work, confirm the storage location and access permissions before use.
 
 When reporting bugs, include:
 
