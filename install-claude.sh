@@ -10,6 +10,8 @@ if [[ ! -f "${source_dir}/SKILL.md" ]]; then
   exit 1
 fi
 
+"${repo_root}/scripts/build_packages.sh" >/dev/null
+
 mkdir -p "${HOME}/.claude/skills"
 
 if [[ -e "${target_dir}" && ! -d "${target_dir}" ]]; then

@@ -6,3 +6,5 @@ __pycache__/
 work/
 dist/
 *.zip
+claude/worklog/lib/
+plugins/worklog/lib/

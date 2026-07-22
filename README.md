@@ -13,7 +13,16 @@ Worklog does not ship predefined legal, medical, engineering, or research templa
 
 ## Private Beta
 
-This repo contains two self-contained wrappers:
+The implementation lives once in `src/worklog`. The Claude and Codex packages
+are thin wrappers; `scripts/build_packages.sh` copies the shared source into
+each package's ignored `lib/` directory before installation.
+
+```text
+src/worklog/
+  mcp_server.py
+```
+
+The host-specific packages are:
 
 ```text
 claude/worklog/
@@ -56,6 +65,7 @@ Use:
 From Codex:
 
 ```bash
+./scripts/build_packages.sh
 codex plugin marketplace add /path/to/worklog
 codex plugin add worklog@worklog-beta
 ```
