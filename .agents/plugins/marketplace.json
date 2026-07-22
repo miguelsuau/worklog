@@ -1,0 +1,20 @@
+{
+  "name": "worklog-beta",
+  "interface": {
+    "displayName": "Worklog Beta"
+  },
+  "plugins": [
+    {
+      "name": "worklog",
+      "source": {
+        "source": "local",
+        "path": "./plugins/worklog"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}
