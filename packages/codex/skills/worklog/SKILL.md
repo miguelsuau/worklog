@@ -32,7 +32,7 @@ Treat any of these as an explicit request to use Worklog:
 - "load Worklog"
 - "track this in Worklog"
 
-Codex can invoke this standalone skill with `$worklog`. ChatGPT plugin surfaces support `@worklog`. `/worklog` and `\worklog` are command-like text conventions; if the host passes either through in the prompt, treat it exactly like an explicit Worklog invocation.
+Codex can invoke this skill with `$worklog` or `/worklog`. ChatGPT plugin surfaces support `@worklog`. `\worklog` is a command-like text convention; if the host passes it through in the prompt, treat it exactly like an explicit Worklog invocation.
 
 When the invocation includes a task after the command, strip the invocation marker mentally and do the user's task, but use Worklog first:
 
