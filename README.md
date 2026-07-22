@@ -4,20 +4,20 @@ Worklog is a local MCP-backed project context tool for agent-assisted work.
 
 ## Why Worklog
 
-Agent work often disappears into long chat transcripts: useful decisions,
+Agent work often disappears into long chat transcripts. Useful decisions,
 constraints, results, and next steps are mixed with raw commands, tool output,
-and back-and-forth. Worklog gives that work a reviewed record.
+and back-and-forth, so the signal is easy to lose.
 
-Agent-assisted projects also accumulate context in many places: chat
-transcripts, `memory.md`, `CLAUDE.md`, issue comments, scratch reports, and
-generated files. That context can be valuable, but it is usually informal,
-scattered, tool-specific, and only partly reviewed.
+Many agent-assisted projects try to preserve that signal in `memory.md`,
+`CLAUDE.md`, issue comments, scratch reports, and generated files. Those notes
+can be valuable, but they are usually informal, scattered across tools, and only
+partly reviewed.
 
-Worklog gives that context a structured human-reviewed path: source events stay
-local by default, each session becomes a user-approved session log, and project
-logs are updated only from approved session logs. The goal is a durable project
-record that future agents can resume from without treating an unreviewed
-transcript or ad hoc note as truth.
+Worklog turns that scattered context into a structured, human-reviewed project
+record. Source events stay local by default, each session becomes a
+user-approved session log, and project logs are updated only from approved
+session logs. Future agents can resume from the approved record without
+treating an unreviewed transcript or ad hoc note as truth.
 
 Worklog is built around four core concepts:
 
