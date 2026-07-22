@@ -66,7 +66,7 @@ Use:
 $worklog
 ```
 
-## Friend Beta Notes
+## Beta Testing Notes
 
 Do not use Worklog for sensitive client, patient, legal, or confidential material unless you understand where your local and shared Worklog files are stored.
 
