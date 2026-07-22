@@ -12,22 +12,23 @@ Many agent-assisted projects try to preserve that context in notes, issue
 comments, scratch reports, generated files, and tool-specific project docs (for
 example, Codex's `AGENTS.md`, Claude Code's `CLAUDE.md`, or a project
 `memory.md`). Those artifacts can be valuable, but they are usually informal,
-scattered across tools, and only partly reviewed.
+scattered across tools, and only partly reviewed. This is the reviewed context
+gap: important context exists, but it is not yet a reliable project record.
 
-Worklog turns that scattered context into a structured, human-reviewed project
-record. Source events stay local by default, each session becomes a
-user-approved session log, and project logs are updated only from approved
-session logs. Future agents can resume from the approved record without
-treating an unreviewed transcript or ad hoc note as truth.
+Worklog closes that gap by turning scattered context into a structured,
+human-reviewed project record. Source events stay local by default, each
+session becomes a user-approved session log, and project logs are updated only
+from approved session logs. Future agents can resume from the approved record
+without treating an unreviewed transcript or ad hoc note as truth.
 
-On teams, the same need shows up across people. Teams usually share the outputs
-of agent work, such as code, documents, notebooks, tickets, or reports, but the
-context behind those outputs often stays in one person's local chat: what was
-tried, why decisions were made, which constraints were discovered, and what
-should happen next. Shared Worklog projects turn that hidden context into a
-reviewed team record, making handoffs easier, reducing repeated discovery, and
-giving future agents the same approved facts without publishing raw transcripts
-or unfinished drafts.
+On teams, the reviewed context gap shows up across people. Teams usually share
+the outputs of agent work, such as code, documents, notebooks, tickets, or
+reports, but the context behind those outputs often stays in one person's local
+chat: what was tried, why decisions were made, which constraints were
+discovered, and what should happen next. Shared Worklog projects turn that
+hidden context into a reviewed team record, making handoffs easier, reducing
+repeated discovery, and giving future agents the same approved facts without
+publishing raw transcripts or unfinished drafts.
 
 Worklog is built around four core concepts:
 
