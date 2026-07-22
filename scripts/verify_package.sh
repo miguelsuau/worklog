@@ -9,10 +9,10 @@ export PYTHONPYCACHEPREFIX="${PYTHONPYCACHEPREFIX:-/tmp/worklog-pycache}"
 
 python3 -m py_compile \
   "${repo_root}/src/worklog/mcp_server.py" \
-  "${repo_root}/claude/worklog/scripts/worklog_mcp_server.py" \
-  "${repo_root}/plugins/worklog/scripts/worklog_mcp_server.py" \
-  "${repo_root}/claude/worklog/lib/worklog/mcp_server.py" \
-  "${repo_root}/plugins/worklog/lib/worklog/mcp_server.py"
+  "${repo_root}/packages/claude/scripts/worklog_mcp_server.py" \
+  "${repo_root}/packages/codex/scripts/worklog_mcp_server.py" \
+  "${repo_root}/packages/claude/lib/worklog/mcp_server.py" \
+  "${repo_root}/packages/codex/lib/worklog/mcp_server.py"
 
 python3 - <<'PY'
 import json
@@ -23,15 +23,15 @@ repo = Path(os.environ["WORKLOG_REPO_ROOT"])
 files = [
     repo / ".claude-plugin" / "marketplace.json",
     repo / ".agents" / "plugins" / "marketplace.json",
-    repo / "claude" / "worklog" / ".claude-plugin" / "plugin.json",
-    repo / "plugins" / "worklog" / ".codex-plugin" / "plugin.json",
-    repo / "claude" / "worklog" / ".mcp.json",
-    repo / "plugins" / "worklog" / ".mcp.json",
+    repo / "packages" / "claude" / ".claude-plugin" / "plugin.json",
+    repo / "packages" / "codex" / ".codex-plugin" / "plugin.json",
+    repo / "packages" / "claude" / ".mcp.json",
+    repo / "packages" / "codex" / ".mcp.json",
 ]
 for file in files:
     json.loads(file.read_text())
 source = repo / "src" / "worklog" / "mcp_server.py"
-for package in [repo / "claude" / "worklog", repo / "plugins" / "worklog"]:
+for package in [repo / "packages" / "claude", repo / "packages" / "codex"]:
     vendored = package / "lib" / "worklog" / "mcp_server.py"
     if vendored.read_bytes() != source.read_bytes():
         raise SystemExit(f"{vendored} differs from shared source.")

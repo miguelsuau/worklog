@@ -7,7 +7,7 @@
   "plugins": [
     {
       "name": "worklog",
-      "source": "./claude/worklog",
+      "source": "./packages/claude",
       "description": "Turn work sessions into reviewed session logs and project logs.",
       "version": "0.1.0-beta.1",
       "author": {

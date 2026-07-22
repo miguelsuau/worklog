@@ -11,7 +11,7 @@ source into each package's ignored `lib/` directory.
 
 ## Claude
 
-Install `../../claude/worklog` into Claude's skills directory to use the short slash command:
+Install `../claude` into Claude's skills directory to use the short slash command:
 
 ```bash
 ./install-claude.sh

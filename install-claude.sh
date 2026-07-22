@@ -2,7 +2,7 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source_dir="${repo_root}/claude/worklog"
+source_dir="${repo_root}/packages/claude"
 target_dir="${HOME}/.claude/skills/worklog"
 
 if [[ ! -f "${source_dir}/SKILL.md" ]]; then

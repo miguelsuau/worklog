@@ -43,13 +43,13 @@ src/worklog/
 The host-specific packages are:
 
 ```text
-claude/worklog/
+packages/claude/
   SKILL.md
   .claude-plugin/plugin.json
   .mcp.json
   scripts/worklog_mcp_server.py
 
-plugins/worklog/
+packages/codex/
   .codex-plugin/plugin.json
   .mcp.json
   skills/worklog/SKILL.md

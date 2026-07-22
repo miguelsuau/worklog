@@ -9,7 +9,7 @@ Use the `worklog` MCP server exposed by the installed Worklog plugin as the fact
 
 - Source events are local captured material. Keep them hidden unless the user explicitly asks for raw evidence.
 - A session log is the human-reviewed summary of one work session, using the user's chosen template.
-- A project log is the approved, living project-level state, using the user's chosen template.
+- A project log is the approved, living project-level summary updated from approved session logs, using the user's chosen template.
 - Resume context is generated from the latest approved project log plus recent approved session logs.
 - Shared projects keep drafts local and publish only approved artifacts to the selected shared backend.
 

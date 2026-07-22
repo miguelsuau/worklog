@@ -8,7 +8,7 @@
       "name": "worklog",
       "source": {
         "source": "local",
-        "path": "./plugins/worklog"
+        "path": "./packages/codex"
       },
       "policy": {
         "installation": "AVAILABLE",
