@@ -31,13 +31,19 @@ Worklog does not ship predefined legal, medical, engineering, or research templa
 
 ## Private Beta
 
-The implementation lives once in `src/worklog`. The Claude and Codex packages
-are thin wrappers; `scripts/build_packages.sh` copies the shared source into
-each package's ignored `lib/` directory before installation.
+The implementation lives once in `src/worklog`. The skill instructions live
+once in `skill/worklog.body.md`; `scripts/generate_skills.py` renders the
+host-specific Claude and Codex `SKILL.md` files with only frontmatter and
+invocation wording changed. The Claude and Codex packages are thin wrappers;
+`scripts/build_packages.sh` copies the shared source into each package's
+ignored `lib/` directory before installation.
 
 ```text
 src/worklog/
   mcp_server.py
+
+skill/
+  worklog.body.md
 ```
 
 The host-specific packages are:
@@ -55,6 +61,10 @@ packages/codex/
   skills/worklog/SKILL.md
   scripts/worklog_mcp_server.py
 ```
+
+The package folders differ internally because Codex expects skills under
+`skills/<name>/`, while the Claude beta package is installed as a single root
+skill.
 
 Claude is the first supported beta target. Codex packaging is included so it can be tested from the same source.
 
