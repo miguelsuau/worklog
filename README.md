@@ -98,10 +98,11 @@ codex plugin marketplace add /path/to/worklog
 codex plugin add worklog@worklog-beta
 ```
 
-Use:
+Use either:
 
 ```text
 $worklog
+/worklog
 ```
 
 ## Beta Testing Notes
