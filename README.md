@@ -11,7 +11,7 @@ and back-and-forth, so the important context is easy to lose.
 Many agent-assisted projects try to preserve that context in notes, issue
 comments, scratch reports, generated files, and tool-specific project docs (for
 example, Codex's `AGENTS.md`, Claude Code's `CLAUDE.md`, or a project
-`memory.md`). That context can be valuable, but it is usually informal,
+`memory.md`). Those artifacts can be valuable, but they are usually informal,
 scattered across tools, and only partly reviewed.
 
 Worklog turns that scattered context into a structured, human-reviewed project
