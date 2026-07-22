@@ -1,0 +1,24 @@
+{
+  "name": "worklog-beta",
+  "owner": {
+    "name": "Miguel Suau"
+  },
+  "description": "Private beta marketplace for Worklog.",
+  "plugins": [
+    {
+      "name": "worklog",
+      "source": "./claude/worklog",
+      "description": "Turn work sessions into reviewed session logs and project logs.",
+      "version": "0.1.0-beta.1",
+      "author": {
+        "name": "Miguel Suau"
+      },
+      "category": "Productivity",
+      "tags": [
+        "worklog",
+        "project-context",
+        "mcp"
+      ]
+    }
+  ]
+}
