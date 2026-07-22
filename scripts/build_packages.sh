@@ -4,6 +4,8 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source_dir="${repo_root}/src/worklog"
 
+python3 "${repo_root}/scripts/generate_skills.py"
+
 if [[ ! -f "${source_dir}/mcp_server.py" ]]; then
   echo "Could not find shared Worklog source at ${source_dir}" >&2
   exit 1
