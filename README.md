@@ -140,8 +140,8 @@ skill will not make `/worklog` available in Chat or Cowork.
 
 ### Ask Cowork To Install It
 
-For friends who do not want to use the command line, the easiest beta path is to
-ask Claude Cowork to drive the Claude Desktop install flow.
+For a no-command-line beta install, ask Claude Cowork to drive the Claude
+Desktop install flow.
 
 Open Claude Desktop, switch to Cowork, and paste:
 
