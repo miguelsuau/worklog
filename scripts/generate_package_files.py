@@ -18,8 +18,24 @@ PLACEHOLDER = "{{HOST_INVOCATION_NOTE}}"
 
 HOSTS = {
     "claude": {
-        "skill_path": ROOT / "packages" / "claude" / "SKILL.md",
+        "skill_path": ROOT / "packages" / "claude" / "skills" / "worklog" / "SKILL.md",
         "launcher_path": ROOT / "packages" / "claude" / "scripts" / "worklog_mcp_server.py",
+        "skill_description": (
+            "Use Worklog when the user invokes /worklog, asks to use Worklog, or wants "
+            "to track, resume, or review project work; create user-approved templates, "
+            "capture session logs, author project-log rollups, and generate resume "
+            "context using the installed Worklog MCP tools."
+        ),
+        "invocation_note": (
+            "Claude can invoke this skill with `/worklog`. `$worklog`, `@worklog`, and "
+            "`\\worklog` are command-like conventions from other agent hosts; if the "
+            "host passes any of them through in the prompt, treat it exactly like an "
+            "explicit Worklog invocation."
+        ),
+    },
+    "claude_code": {
+        "skill_path": ROOT / "packages" / "claude-code" / "SKILL.md",
+        "launcher_path": ROOT / "packages" / "claude-code" / "scripts" / "worklog_mcp_server.py",
         "skill_description": (
             "Use Worklog when the user invokes /worklog, asks to use Worklog, or wants "
             "to track, resume, or review project work; create user-approved templates, "
@@ -82,9 +98,27 @@ def generated_manifests(metadata: dict[str, Any]) -> dict[Path, str]:
 
     claude_plugin = {
         "name": name,
+        "displayName": metadata["display_name"],
         "description": descriptions["claude"],
         "version": version,
         "author": author,
+        "homepage": metadata["homepage"],
+        "repository": metadata["repository"],
+        "license": metadata["license"],
+        "keywords": metadata["keywords"],
+        "skills": "./skills/",
+        "mcpServers": "./.mcp.json",
+    }
+    claude_code_plugin = {
+        "name": name,
+        "displayName": metadata["display_name"],
+        "description": descriptions["claude"],
+        "version": version,
+        "author": author,
+        "homepage": metadata["homepage"],
+        "repository": metadata["repository"],
+        "license": metadata["license"],
+        "keywords": metadata["keywords"],
         "mcpServers": "./.mcp.json",
     }
     codex_plugin = {
@@ -144,9 +178,46 @@ def generated_manifests(metadata: dict[str, Any]) -> dict[Path, str]:
     }
     return {
         ROOT / "packages" / "claude" / ".claude-plugin" / "plugin.json": json_text(claude_plugin),
+        ROOT / "packages" / "claude-code" / ".claude-plugin" / "plugin.json": json_text(claude_code_plugin),
         ROOT / "packages" / "codex" / ".codex-plugin" / "plugin.json": json_text(codex_plugin),
         ROOT / ".agents" / "plugins" / "marketplace.json": json_text(codex_marketplace),
         ROOT / ".claude-plugin" / "marketplace.json": json_text(claude_marketplace),
+    }
+
+
+def generated_mcp_configs() -> dict[Path, str]:
+    claude_mcp = {
+        "mcpServers": {
+            "worklog": {
+                "command": "python3",
+                "args": [
+                    "${CLAUDE_PLUGIN_ROOT}/scripts/worklog_mcp_server.py",
+                ],
+                "env": {
+                    "WORKLOG_STORE": "${CLAUDE_PLUGIN_DATA}/store",
+                },
+                "startup_timeout_sec": 10,
+                "tool_timeout_sec": 60,
+            }
+        }
+    }
+    codex_mcp = {
+        "mcpServers": {
+            "worklog": {
+                "command": "python3",
+                "args": [
+                    "scripts/worklog_mcp_server.py",
+                ],
+                "cwd": ".",
+                "startup_timeout_sec": 10,
+                "tool_timeout_sec": 60,
+            }
+        }
+    }
+    return {
+        ROOT / "packages" / "claude" / ".mcp.json": json_text(claude_mcp),
+        ROOT / "packages" / "claude-code" / ".mcp.json": json_text(claude_mcp),
+        ROOT / "packages" / "codex" / ".mcp.json": json_text(codex_mcp),
     }
 
 
@@ -158,6 +229,7 @@ def generated_files() -> dict[Path, str]:
     metadata = read_json(METADATA_PATH)
     launcher = LAUNCHER_PATH.read_text()
     outputs = generated_manifests(metadata)
+    outputs.update(generated_mcp_configs())
 
     for host in HOSTS.values():
         outputs[host["skill_path"]] = render_skill(host, body)

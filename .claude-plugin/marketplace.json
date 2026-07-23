@@ -3,13 +3,13 @@
   "owner": {
     "name": "Miguel Suau"
   },
-  "description": "Private beta marketplace for Worklog.",
+  "description": "Beta marketplace for Worklog.",
   "plugins": [
     {
       "name": "worklog",
       "source": "./packages/claude",
       "description": "Turn work sessions into reviewed session logs and project logs.",
-      "version": "0.1.0-beta.1",
+      "version": "0.1.0-beta.2",
       "author": {
         "name": "Miguel Suau"
       },

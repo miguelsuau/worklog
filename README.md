@@ -74,9 +74,9 @@ agent should ask the user to apply that provider permission manually.
 
 The implementation lives once in `src/worklog`. The skill instructions,
 metadata, and MCP launcher also have single shared sources. The Claude and
-Codex packages are generated thin wrappers; `scripts/build_packages.sh` renders
+Codex packages are generated wrappers; `scripts/build_packages.sh` renders
 host-specific package files and copies the shared source into each package's
-ignored `lib/` directory before installation.
+`lib/` directory so marketplace installs are self-contained.
 
 ```text
 src/worklog/
@@ -92,36 +92,68 @@ plugin.metadata.json
 ```
 
 Generated package files are committed for easy beta installs.
-`scripts/verify_package.sh` fails if generated package files drift from their
-shared sources.
+`scripts/verify_package.sh` fails if generated package files or vendored
+package sources drift from their shared sources.
 
 The host-specific packages are:
 
 ```text
 packages/claude/
+  .claude-plugin/plugin.json
+  .mcp.json
+  skills/worklog/SKILL.md
+  scripts/worklog_mcp_server.py
+  lib/worklog/
+
+packages/claude-code/
   SKILL.md
   .claude-plugin/plugin.json
   .mcp.json
   scripts/worklog_mcp_server.py
+  lib/worklog/
 
 packages/codex/
   .codex-plugin/plugin.json
   .mcp.json
   skills/worklog/SKILL.md
   scripts/worklog_mcp_server.py
+  lib/worklog/
 ```
 
-The package folders differ internally because Codex expects skills under
-`skills/<name>/`, while the Claude beta package is installed as a single root
-skill.
+The package folders differ internally because Claude Chat/Cowork expect an
+installable plugin package, Claude Code's direct installer uses a single root
+skill, and Codex expects skills under `skills/<name>/`.
 
 Claude is the first supported beta target. Codex packaging is included so it can be tested from the same source.
 
-## Install With Claude
+## Install For Claude Chat/Cowork
 
-The easiest beta path is to ask Claude Code to install Worklog for you. This assumes Claude Code is already installed and that the tester has access to this repository or release package.
+Use this path for Claude Desktop Chat or Cowork. Installing only the Claude Code
+skill will not make `/worklog` available in Chat or Cowork.
 
-1. Open Claude Code.
+1. Open Claude Desktop.
+2. Open Customize, then Plugins. In Cowork, open Cowork first, then open Customize.
+3. Add a plugin marketplace from this GitHub repository:
+
+```text
+https://github.com/miguelsuau/worklog
+```
+
+4. Install Worklog from the Worklog Beta marketplace.
+5. Start a Chat or Cowork task and use:
+
+```text
+/worklog
+```
+
+If `/worklog` says `Unknown skill: worklog`, check that Worklog is installed and
+enabled under Customize > Plugins.
+
+## Install With Claude Code
+
+The easiest Code-tab beta path is to ask Claude Code to install Worklog for you. This assumes Claude Code is already installed, or that you are using the Code tab in Claude Desktop.
+
+1. Open Claude Code, or open Claude Desktop and switch to the Code tab.
 2. Paste this prompt:
 
 ```text
@@ -134,9 +166,9 @@ Please:
 4. Tell me when installation is complete and remind me to restart Claude Code or run /reload-plugins.
 ```
 
-Claude should download the repo, run `./install-claude.sh`, and ask for permission before shell or file actions. After installation, restart Claude Code or run `/reload-plugins`, then use `/worklog`.
+Claude should download the repo, run `./install-claude.sh`, and ask for permission before shell or file actions. After installation, restart Claude Code or the Claude desktop Code tab, then use `/worklog`.
 
-## Install For Claude
+## Install For Claude Code
 
 From this repo:
 
@@ -144,7 +176,7 @@ From this repo:
 ./install-claude.sh
 ```
 
-Then restart Claude Code or run:
+Then restart Claude Code or the Claude desktop Code tab, or run:
 
 ```text
 /reload-plugins

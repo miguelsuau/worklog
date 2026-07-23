@@ -6,5 +6,3 @@ __pycache__/
 work/
 dist/
 *.zip
-packages/claude/lib/
-packages/codex/lib/

@@ -15,6 +15,5 @@
     "session-log",
     "mcp"
   ],
-  "skills": "./skills/",
   "mcpServers": "./.mcp.json"
 }

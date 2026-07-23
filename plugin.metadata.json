@@ -1,12 +1,14 @@
 {
   "name": "worklog",
   "marketplace_name": "worklog-beta",
-  "version": "0.1.0-beta.1",
+  "version": "0.1.0-beta.2",
   "author": {
     "name": "Miguel Suau"
   },
   "category": "Productivity",
   "license": "MIT",
+  "homepage": "https://github.com/miguelsuau/worklog",
+  "repository": "https://github.com/miguelsuau/worklog",
   "keywords": [
     "worklog",
     "project-context",
@@ -23,7 +25,7 @@
   "descriptions": {
     "claude": "Turn work sessions into reviewed session logs and project logs.",
     "codex": "Explicit Worklog tracking and reviewed project context for agent work.",
-    "marketplace": "Private beta marketplace for Worklog.",
+    "marketplace": "Beta marketplace for Worklog.",
     "short": "Turn sessions into reviewed project context.",
     "long": "Worklog captures local source events, stores user-approved templates for session logs and project logs, helps the assistant author reviewed project-log rollups, and generates concise resume context for future agent tasks. Shared projects keep drafts local and publish only approved artifacts."
   },

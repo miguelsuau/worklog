@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "worklog": {
+      "command": "python3",
+      "args": [
+        "${CLAUDE_PLUGIN_ROOT}/scripts/worklog_mcp_server.py"
+      ],
+      "env": {
+        "WORKLOG_STORE": "${CLAUDE_PLUGIN_DATA}/store"
+      },
+      "startup_timeout_sec": 10,
+      "tool_timeout_sec": 60
+    }
+  }
+}

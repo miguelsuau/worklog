@@ -2,7 +2,7 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source_dir="${repo_root}/packages/claude"
+source_dir="${repo_root}/packages/claude-code"
 target_dir="${HOME}/.claude/skills/worklog"
 
 if [[ ! -f "${source_dir}/SKILL.md" ]]; then
@@ -26,5 +26,5 @@ if [[ -d "${target_dir}" ]]; then
 fi
 
 cp -R "${source_dir}" "${target_dir}"
-echo "Installed Worklog for Claude at ${target_dir}"
-echo "Restart Claude Code or run /reload-plugins, then use /worklog."
+echo "Installed Worklog for Claude Code at ${target_dir}"
+echo "Restart Claude Code or the Claude desktop Code tab, then use /worklog."

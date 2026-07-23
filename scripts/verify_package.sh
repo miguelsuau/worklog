@@ -6,6 +6,24 @@ export WORKLOG_REPO_ROOT="${repo_root}"
 export PYTHONPYCACHEPREFIX="${PYTHONPYCACHEPREFIX:-/tmp/worklog-pycache}"
 
 python3 "${repo_root}/scripts/generate_package_files.py" --check
+
+python3 - <<'PY'
+import os
+from pathlib import Path
+
+repo = Path(os.environ["WORKLOG_REPO_ROOT"])
+source = repo / "src" / "worklog" / "mcp_server.py"
+packages = [
+    repo / "packages" / "claude",
+    repo / "packages" / "claude-code",
+    repo / "packages" / "codex",
+]
+for package in packages:
+    vendored = package / "lib" / "worklog" / "mcp_server.py"
+    if vendored.read_bytes() != source.read_bytes():
+        raise SystemExit(f"{vendored} differs from shared source.")
+PY
+
 "${repo_root}/scripts/build_packages.sh" >/dev/null
 
 python3 -m py_compile \
@@ -13,8 +31,10 @@ python3 -m py_compile \
   "${repo_root}/launcher/worklog_mcp_server.py" \
   "${repo_root}/src/worklog/mcp_server.py" \
   "${repo_root}/packages/claude/scripts/worklog_mcp_server.py" \
+  "${repo_root}/packages/claude-code/scripts/worklog_mcp_server.py" \
   "${repo_root}/packages/codex/scripts/worklog_mcp_server.py" \
   "${repo_root}/packages/claude/lib/worklog/mcp_server.py" \
+  "${repo_root}/packages/claude-code/lib/worklog/mcp_server.py" \
   "${repo_root}/packages/codex/lib/worklog/mcp_server.py"
 
 python3 - <<'PY'
@@ -28,16 +48,18 @@ files = [
     repo / ".claude-plugin" / "marketplace.json",
     repo / ".agents" / "plugins" / "marketplace.json",
     repo / "packages" / "claude" / ".claude-plugin" / "plugin.json",
+    repo / "packages" / "claude-code" / ".claude-plugin" / "plugin.json",
     repo / "packages" / "codex" / ".codex-plugin" / "plugin.json",
     repo / "packages" / "claude" / ".mcp.json",
+    repo / "packages" / "claude-code" / ".mcp.json",
     repo / "packages" / "codex" / ".mcp.json",
 ]
 for file in files:
     json.loads(file.read_text())
 source = repo / "src" / "worklog" / "mcp_server.py"
-for package in [repo / "packages" / "claude", repo / "packages" / "codex"]:
+for package in [repo / "packages" / "claude", repo / "packages" / "claude-code", repo / "packages" / "codex"]:
     vendored = package / "lib" / "worklog" / "mcp_server.py"
     if vendored.read_bytes() != source.read_bytes():
         raise SystemExit(f"{vendored} differs from shared source.")
-print("Worklog package files are valid JSON, generated files are current, package builds are current, and the MCP server compiles.")
+print("Worklog package files are valid JSON, generated files and vendored package sources are current, package builds are current, and the MCP server compiles.")
 PY
