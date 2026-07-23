@@ -51,8 +51,8 @@ For shared projects, the assistant should guide setup in stages:
 
 1. Ask whether the project should be shared.
 2. Ask the user to choose a storage provider, such as Google Drive, Dropbox,
-   OneDrive, a network folder, a Docker-mounted folder, GitHub, GitLab,
-   Bitbucket, or a local Git repository.
+   OneDrive, a network folder, a Docker-mounted folder, GitHub, GitLab, or
+   Bitbucket.
 3. Build or inspect the selected provider setup.
 4. Suggest provider-specific paths or repositories.
 5. Configure the project only after the user confirms the provider and
