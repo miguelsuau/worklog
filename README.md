@@ -70,6 +70,35 @@ authenticated connector, API, browser, admin tool, or desktop sync surface can
 do it. If no available tool can complete the backend permission change, the
 agent should ask the user to apply that provider permission manually.
 
+## Install Worklog
+
+Install Worklog from the public Worklog Beta plugin marketplace:
+
+```text
+https://github.com/miguelsuau/worklog
+```
+
+In Claude Desktop, open Customize > Plugins, add that repository as a plugin
+marketplace if it is not already listed, install Worklog from the Worklog Beta
+marketplace, then start a new Chat or Cowork task and use:
+
+```text
+/worklog
+```
+
+Claude Code uses its own plugin manager, but it installs from the same
+marketplace:
+
+```text
+/plugin marketplace add miguelsuau/worklog
+/plugin install worklog@worklog-beta
+/reload-plugins
+```
+
+If `/worklog` says `Unknown skill: worklog`, update the Worklog Beta
+marketplace, make sure Worklog is installed and enabled in that host, then
+restart Claude Desktop or run `/reload-plugins` in Claude Code.
+
 ## Repository Layout
 
 The implementation lives once in `src/worklog`. The skill instructions,
@@ -133,107 +162,13 @@ skill, and Codex expects skills under `skills/<name>/`.
 
 Claude is the first supported beta target. Codex packaging is included so it can be tested from the same source.
 
-## Install For Claude Chat/Cowork
+## Maintainer Notes
 
-Use this path for Claude Desktop Chat or Cowork. Installing only the Claude Code
-skill will not make `/worklog` available in Chat or Cowork.
-
-### Ask Cowork To Install It
-
-For a no-command-line beta install, ask Claude Cowork to drive the Claude
-Desktop install flow.
-
-Open Claude Desktop, switch to Cowork, and paste:
-
-```text
-Please install Worklog from this public GitHub plugin marketplace:
-https://github.com/miguelsuau/worklog
-
-Use Claude Desktop's Customize > Plugins flow:
-1. Add that repository as a plugin marketplace if it is not already added.
-2. Install the Worklog plugin from the Worklog Beta marketplace.
-3. Ask me before changing settings or granting permissions.
-4. When finished, tell me to start a new Chat or Cowork task and type /worklog.
-```
-
-Regular Chat may explain the steps rather than operate the Desktop UI. Cowork is
-the better place for the copy-paste prompt because it can use the local desktop
-when computer use is enabled.
-
-### Install From The Marketplace
-
-1. Open Claude Desktop.
-2. Open Customize, then Plugins. In Cowork, open Cowork first, then open Customize.
-3. Add a plugin marketplace from this GitHub repository:
-
-```text
-https://github.com/miguelsuau/worklog
-```
-
-4. Install Worklog from the Worklog Beta marketplace.
-5. Start a Chat or Cowork task and use:
-
-```text
-/worklog
-```
-
-If `/worklog` says `Unknown skill: worklog`, check that Worklog is installed and
-enabled under Customize > Plugins. You may also need to restart Claude Desktop
-or update the Worklog Beta marketplace.
-
-### Install From A Plugin File
-
-If you receive `worklog-claude-plugin.zip`, install it directly:
-
-1. Open Claude Desktop.
-2. Open Customize, then Plugins.
-3. Choose the upload option on the Plugins page.
-4. Select `worklog-claude-plugin.zip`.
-5. Start a Chat or Cowork task and use `/worklog`.
-
-A standalone plugin file is useful when you want to send Worklog to a tester
-without asking them to clone a repository or run shell commands.
-
-## Install With Claude Code
-
-The easiest Code-tab beta path is to ask Claude Code to install Worklog for you. This assumes Claude Code is already installed, or that you are using the Code tab in Claude Desktop.
-
-1. Open Claude Code, or open Claude Desktop and switch to the Code tab.
-2. Paste this prompt:
-
-```text
-Install Worklog for Claude Code from https://github.com/miguelsuau/worklog.
-
-Please:
-1. Download or clone the repository into a temporary folder.
-2. Run its Claude installer.
-3. Ask me before running shell commands or modifying files.
-4. Tell me when installation is complete and remind me to restart Claude Code or run /reload-plugins.
-```
-
-Claude should download the repo, run `./install-claude.sh`, and ask for permission before shell or file actions. After installation, restart Claude Code or the Claude desktop Code tab, then use `/worklog`.
-
-## Install For Claude Code
-
-From this repo:
+Build the host packages and validate them with:
 
 ```bash
-./install-claude.sh
+./scripts/verify_package.sh
 ```
-
-Then restart Claude Code or the Claude desktop Code tab, or run:
-
-```text
-/reload-plugins
-```
-
-Use:
-
-```text
-/worklog
-```
-
-## Build The Claude Plugin ZIP
 
 For beta distribution, build a standalone Claude Chat/Cowork plugin file:
 
@@ -255,9 +190,7 @@ than editing package files by hand.
 Tagged releases whose tag starts with `v` publish this ZIP as a GitHub Release
 asset through `.github/workflows/build-claude-plugin.yml`.
 
-## Install For Codex
-
-From Codex:
+To test the Codex package locally:
 
 ```bash
 ./scripts/build_packages.sh
