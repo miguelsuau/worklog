@@ -134,14 +134,12 @@ plugin.metadata.json
 scripts/
   generate_package_files.py
   build_packages.sh
-  build_claude_plugin_zip.sh
   verify_package.sh
 ```
 
 Generated package files are committed for easy beta installs.
 `scripts/verify_package.sh` fails if generated package files or vendored
-package sources drift from their shared sources. The Claude plugin ZIP is built
-into `dist/` and is not committed.
+package sources drift from their shared sources.
 
 The host-specific packages are:
 
@@ -176,31 +174,15 @@ Claude is the first supported beta target. Codex packaging is included so it can
 
 ## Maintainer Notes
 
-Build the host packages and validate them with:
+Worklog packages are generated from shared sources. Edit `src/`, `skill/`,
+`launcher/`, or `plugin.metadata.json`, then validate the generated package
+files with:
 
 ```bash
 ./scripts/verify_package.sh
 ```
 
-For beta distribution, build a standalone Claude Cowork plugin file:
-
-```bash
-./scripts/build_claude_plugin_zip.sh
-```
-
-This writes:
-
-```text
-dist/worklog-claude-plugin.zip
-```
-
-The ZIP contains the contents of `packages/claude` at the archive root, including
-`.claude-plugin/plugin.json`, `.mcp.json`, `skills/`, `scripts/`, and `lib/`.
-Change the shared sources, run the package build, and regenerate the ZIP rather
-than editing package files by hand.
-
-Tagged releases whose tag starts with `v` publish this ZIP as a GitHub Release
-asset through `.github/workflows/build-claude-plugin.yml`.
+Do not edit generated package files by hand.
 
 To test the Codex package locally:
 
