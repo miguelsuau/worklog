@@ -1,0 +1,45 @@
+name: Build Claude plugin package
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  claude-plugin:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Verify packages and build ZIP
+        run: scripts/verify_package.sh
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: worklog-claude-plugin
+          path: dist/worklog-claude-plugin.zip
+
+      - name: Publish release asset
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" dist/worklog-claude-plugin.zip --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" dist/worklog-claude-plugin.zip --title "$GITHUB_REF_NAME" --notes "Worklog Claude plugin package."
+          fi
