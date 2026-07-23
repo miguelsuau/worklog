@@ -72,6 +72,10 @@ agent should ask the user to apply that provider permission manually.
 
 ## Install Worklog
 
+Worklog currently supports Claude Cowork and Claude Code. Regular Claude Chat is
+not supported in this beta because Worklog depends on a local MCP server, and
+Chat does not currently expose that server to the skill.
+
 The easiest install path is to ask Claude Cowork to add Worklog from the public
 Worklog Beta plugin marketplace. Open Claude Desktop, switch to Cowork, and
 paste:
@@ -84,10 +88,10 @@ Use Claude Desktop's Customize > Plugins flow:
 1. Add that repository as a plugin marketplace if it is not already listed.
 2. Install Worklog from the Worklog Beta marketplace.
 3. Ask me before changing settings or granting permissions.
-4. When finished, tell me to start a new Chat or Cowork task and type /worklog.
+4. When finished, tell me to start a new Cowork task and type /worklog.
 ```
 
-After installation, start a new Chat or Cowork task and use:
+After installation, start a new Cowork task and use:
 
 ```text
 /worklog
@@ -102,7 +106,8 @@ marketplace:
 /reload-plugins
 ```
 
-If `/worklog` says `Unknown skill: worklog`, update the Worklog Beta
+If `/worklog` says `Unknown skill: worklog` in Claude Chat, switch to Cowork or
+Claude Code. If it happens in Cowork or Claude Code, update the Worklog Beta
 marketplace, make sure Worklog is installed and enabled in that host, then
 restart Claude Desktop or run `/reload-plugins` in Claude Code.
 
@@ -163,7 +168,7 @@ packages/codex/
   lib/worklog/
 ```
 
-The package folders differ internally because Claude Chat/Cowork expect an
+The package folders differ internally because Claude Cowork expects an
 installable plugin package, Claude Code's direct installer uses a single root
 skill, and Codex expects skills under `skills/<name>/`.
 
@@ -177,7 +182,7 @@ Build the host packages and validate them with:
 ./scripts/verify_package.sh
 ```
 
-For beta distribution, build a standalone Claude Chat/Cowork plugin file:
+For beta distribution, build a standalone Claude Cowork plugin file:
 
 ```bash
 ./scripts/build_claude_plugin_zip.sh
@@ -218,7 +223,7 @@ Worklog stores reviewed logs locally, and shared projects may publish approved l
 
 When reporting bugs, include:
 
-- agent host and version, such as Claude Code, Codex, or ChatGPT
+- agent host and version, such as Claude Cowork, Claude Code, Codex, or ChatGPT
 - model used
 - operating system and relevant local setup, especially for paths, permissions, sync clients, or containers
 - command or prompt used
