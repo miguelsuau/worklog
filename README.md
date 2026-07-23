@@ -117,6 +117,25 @@ skill.
 
 Claude is the first supported beta target. Codex packaging is included so it can be tested from the same source.
 
+## Install With Claude
+
+The easiest beta path is to ask Claude Code to install Worklog for you. This assumes Claude Code is already installed and that the tester has access to this repository or release package.
+
+1. Open Claude Code.
+2. Paste this prompt:
+
+```text
+Install Worklog for Claude Code from https://github.com/miguelsuau/worklog.
+
+Please:
+1. Download or clone the repository into a temporary folder.
+2. Run its Claude installer.
+3. Ask me before running shell commands or modifying files.
+4. Tell me when installation is complete and remind me to restart Claude Code or run /reload-plugins.
+```
+
+Claude should download the repo, run `./install-claude.sh`, and ask for permission before shell or file actions. After installation, restart Claude Code or run `/reload-plugins`, then use `/worklog`.
+
 ## Install For Claude
 
 From this repo:
