@@ -70,7 +70,7 @@ authenticated connector, API, browser, admin tool, or desktop sync surface can
 do it. If no available tool can complete the backend permission change, the
 agent should ask the user to apply that provider permission manually.
 
-## Private Beta
+## Repository Layout
 
 The implementation lives once in `src/worklog`. The skill instructions,
 metadata, and MCP launcher also have single shared sources. The Claude and
