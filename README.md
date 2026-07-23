@@ -72,15 +72,22 @@ agent should ask the user to apply that provider permission manually.
 
 ## Install Worklog
 
-Install Worklog from the public Worklog Beta plugin marketplace:
+The easiest install path is to ask Claude Cowork to add Worklog from the public
+Worklog Beta plugin marketplace. Open Claude Desktop, switch to Cowork, and
+paste:
 
 ```text
+Please install Worklog from this public GitHub plugin marketplace:
 https://github.com/miguelsuau/worklog
+
+Use Claude Desktop's Customize > Plugins flow:
+1. Add that repository as a plugin marketplace if it is not already listed.
+2. Install Worklog from the Worklog Beta marketplace.
+3. Ask me before changing settings or granting permissions.
+4. When finished, tell me to start a new Chat or Cowork task and type /worklog.
 ```
 
-In Claude Desktop, open Customize > Plugins, add that repository as a plugin
-marketplace if it is not already listed, install Worklog from the Worklog Beta
-marketplace, then start a new Chat or Cowork task and use:
+After installation, start a new Chat or Cowork task and use:
 
 ```text
 /worklog
