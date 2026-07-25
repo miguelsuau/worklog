@@ -98,10 +98,10 @@ After installation, start a new Cowork task and use:
 ```
 
 Claude Code uses its own plugin manager, but it installs from the same
-marketplace:
+marketplace. Use the full GitHub URL so the command works across Claude builds:
 
 ```text
-/plugin marketplace add miguelsuau/worklog
+/plugin marketplace add https://github.com/miguelsuau/worklog.git
 /plugin install worklog@worklog-beta
 /reload-plugins
 ```
