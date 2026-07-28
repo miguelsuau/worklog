@@ -6,6 +6,8 @@ source_dir="${repo_root}/src/worklog"
 
 python3 "${repo_root}/scripts/generate_package_files.py"
 
+rm -rf "${repo_root}/packages/codex/skills"
+
 if [[ ! -f "${source_dir}/mcp_server.py" ]]; then
   echo "Could not find shared Worklog source at ${source_dir}" >&2
   exit 1

@@ -9,7 +9,7 @@
       "name": "worklog",
       "source": "./packages/claude",
       "description": "Turn work sessions into reviewed session logs and project logs.",
-      "version": "0.1.0-beta.2",
+      "version": "0.1.0-beta.3",
       "author": {
         "name": "Miguel Suau"
       },

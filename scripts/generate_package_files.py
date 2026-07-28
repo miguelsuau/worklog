@@ -16,10 +16,9 @@ METADATA_PATH = ROOT / "plugin.metadata.json"
 LAUNCHER_PATH = ROOT / "launcher" / "worklog_mcp_server.py"
 PLACEHOLDER = "{{HOST_INVOCATION_NOTE}}"
 
-HOSTS = {
+SKILL_HOSTS = {
     "claude": {
         "skill_path": ROOT / "packages" / "claude" / "skills" / "worklog" / "SKILL.md",
-        "launcher_path": ROOT / "packages" / "claude" / "scripts" / "worklog_mcp_server.py",
         "skill_description": (
             "Use Worklog when the user invokes /worklog, asks to use Worklog, or wants "
             "to track, resume, or review project work; create user-approved templates, "
@@ -35,7 +34,6 @@ HOSTS = {
     },
     "claude_code": {
         "skill_path": ROOT / "packages" / "claude-code" / "SKILL.md",
-        "launcher_path": ROOT / "packages" / "claude-code" / "scripts" / "worklog_mcp_server.py",
         "skill_description": (
             "Use Worklog when the user invokes /worklog, asks to use Worklog, or wants "
             "to track, resume, or review project work; create user-approved templates, "
@@ -49,24 +47,13 @@ HOSTS = {
             "explicit Worklog invocation."
         ),
     },
-    "codex": {
-        "skill_path": ROOT / "packages" / "codex" / "skills" / "worklog" / "SKILL.md",
-        "launcher_path": ROOT / "packages" / "codex" / "scripts" / "worklog_mcp_server.py",
-        "skill_description": (
-            "Use Worklog when the user explicitly invokes $worklog, /worklog, \\worklog, "
-            "or @worklog, asks to use Worklog, or wants to track, resume, or review "
-            "project work; create user-approved templates, capture session logs, "
-            "author project-log rollups, and generate resume context using the "
-            "installed Worklog MCP tools."
-        ),
-        "invocation_note": (
-            "Codex can invoke this skill with `$worklog` or `/worklog`. ChatGPT plugin "
-            "surfaces support `@worklog`. `\\worklog` is a command-like text "
-            "convention; if the host passes it through in the prompt, treat it exactly "
-            "like an explicit Worklog invocation."
-        ),
-    },
 }
+
+LAUNCHER_PATHS = [
+    ROOT / "packages" / "claude" / "scripts" / "worklog_mcp_server.py",
+    ROOT / "packages" / "claude-code" / "scripts" / "worklog_mcp_server.py",
+    ROOT / "packages" / "codex" / "scripts" / "worklog_mcp_server.py",
+]
 
 
 def read_json(path: Path) -> dict[str, Any]:
@@ -128,7 +115,6 @@ def generated_manifests(metadata: dict[str, Any]) -> dict[Path, str]:
         "author": author,
         "license": metadata["license"],
         "keywords": metadata["keywords"],
-        "skills": "./skills/",
         "mcpServers": "./.mcp.json",
         "interface": {
             "displayName": metadata["display_name"],
@@ -231,9 +217,11 @@ def generated_files() -> dict[Path, str]:
     outputs = generated_manifests(metadata)
     outputs.update(generated_mcp_configs())
 
-    for host in HOSTS.values():
+    for host in SKILL_HOSTS.values():
         outputs[host["skill_path"]] = render_skill(host, body)
-        outputs[host["launcher_path"]] = launcher
+
+    for launcher_path in LAUNCHER_PATHS:
+        outputs[launcher_path] = launcher
 
     return outputs
 

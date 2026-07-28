@@ -1,6 +1,6 @@
 {
   "name": "worklog",
-  "version": "0.1.0-beta.2",
+  "version": "0.1.0-beta.3",
   "description": "Explicit Worklog tracking and reviewed project context for agent work.",
   "author": {
     "name": "Miguel Suau"
@@ -12,7 +12,6 @@
     "session-log",
     "mcp"
   ],
-  "skills": "./skills/",
   "mcpServers": "./.mcp.json",
   "interface": {
     "displayName": "Worklog",
