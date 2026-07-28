@@ -171,9 +171,9 @@ installable plugin package, Claude Code's direct installer uses a single root
 skill, and Codex expects plugin-bundled skills under `skills/<name>/`.
 
 Codex uses `$` mentions for skills, so the Codex package includes a bundled
-`worklog` skill in addition to the MCP server. In current Codex plugin UI,
-bundled skills are namespaced by plugin, so the explicit picker entry may
-appear as `Worklog: Worklog`.
+`worklog` skill in addition to the MCP server. The package uses Codex's unified
+bundled-content presentation so the composer can show Worklog as one clean
+entry.
 
 Claude is the first supported beta target. Codex packaging is included so it can be tested from the same source.
 

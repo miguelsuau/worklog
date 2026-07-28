@@ -1,6 +1,6 @@
 ---
 name: worklog
-description: Use Worklog when the user explicitly invokes $worklog, /worklog, \worklog, or @worklog, asks to use Worklog, or wants to track, resume, or review project work; create user-approved templates, capture session logs, author project-log rollups, and generate resume context using the installed Worklog MCP tools.
+description: Track work sessions, review session logs, update project logs, and resume projects with approved context.
 ---
 
 # Worklog

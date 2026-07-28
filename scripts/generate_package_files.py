@@ -50,11 +50,8 @@ SKILL_HOSTS = {
     "codex": {
         "skill_path": ROOT / "packages" / "codex" / "skills" / "worklog" / "SKILL.md",
         "skill_description": (
-            "Use Worklog when the user explicitly invokes $worklog, /worklog, \\worklog, "
-            "or @worklog, asks to use Worklog, or wants to track, resume, or review "
-            "project work; create user-approved templates, capture session logs, "
-            "author project-log rollups, and generate resume context using the "
-            "installed Worklog MCP tools."
+            "Track work sessions, review session logs, update project logs, and "
+            "resume projects with approved context."
         ),
         "invocation_note": (
             "Codex can invoke this skill with `$worklog` or `/worklog`. ChatGPT plugin "
@@ -142,6 +139,7 @@ def generated_manifests(metadata: dict[str, Any]) -> dict[Path, str]:
             "capabilities": metadata["capabilities"],
             "defaultPrompt": metadata["default_prompts"],
         },
+        "bundledContentVariant": "unified",
     }
     codex_marketplace = {
         "name": marketplace_name,

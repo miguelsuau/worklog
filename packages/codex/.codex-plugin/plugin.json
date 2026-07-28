@@ -1,7 +1,7 @@
 {
   "name": "worklog",
-  "version": "0.1.0-beta.4",
-  "description": "Explicit Worklog tracking and reviewed project context for agent work.",
+  "version": "0.1.0-beta.5",
+  "description": "Track work sessions with reviewed session logs and project logs.",
   "author": {
     "name": "Miguel Suau"
   },
@@ -16,8 +16,8 @@
   "mcpServers": "./.mcp.json",
   "interface": {
     "displayName": "Worklog",
-    "shortDescription": "Turn sessions into reviewed project context.",
-    "longDescription": "Worklog captures local source events, stores user-approved templates for session logs and project logs, helps the assistant author reviewed project-log rollups, and generates concise resume context for future agent tasks. Shared projects keep drafts local and publish only approved artifacts.",
+    "shortDescription": "Reviewed session logs and project context for agent work.",
+    "longDescription": "Worklog turns agent work sessions into human-reviewed session logs and project logs, then uses the approved record to resume future work. Shared projects keep drafts local and publish only approved artifacts.",
     "developerName": "Miguel Suau",
     "category": "Productivity",
     "capabilities": [
@@ -29,5 +29,6 @@
       "Start Worklog setup for this project.",
       "Review this session with Worklog."
     ]
-  }
+  },
+  "bundledContentVariant": "unified"
 }
