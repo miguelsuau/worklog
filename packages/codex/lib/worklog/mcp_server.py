@@ -32,7 +32,7 @@ SHARED_LAYOUT_VERSION = 1
 SHARING_BACKENDS = {"shared_directory", "git_repo", "connector_payload"}
 MOUNTED_STORAGE_PROVIDERS = ["google_drive", "dropbox", "onedrive", "network_folder", "local_folder", "docker_mount"]
 CLOUD_SYNC_STORAGE_PROVIDERS = ["google_drive", "dropbox", "onedrive"]
-GIT_STORAGE_PROVIDERS = ["github", "gitlab", "bitbucket", "git_repo"]
+GIT_STORAGE_PROVIDERS = ["github", "gitlab", "bitbucket"]
 
 DEFAULT_SESSION_TEMPLATE = {
     "name": "Unconfigured Session Log",
@@ -155,8 +155,9 @@ class Server:
             "instructions": (
                 "Use Worklog for a simple reviewed work history. Source events are raw "
                 "local material and should normally stay hidden. Session logs are the "
-                "human-reviewed summary of a work session. Project logs are the approved "
-                "living project state. The user chooses the session-log and project-log "
+                "human-reviewed summary of a work session. Project logs are approved, "
+                "living project-level summaries updated from approved session logs. "
+                "The user chooses the session-log and project-log "
                 "templates at project setup. Project-log rollups are LLM-authored from "
                 "approved session logs and approved project state; Worklog stores the "
                 "draft but does not mechanically decide where facts belong. When starting a project, ask about the "
@@ -570,10 +571,10 @@ class Server:
     def capture_session(self, args: dict[str, Any]) -> dict[str, Any]:
         source_path = find_session_file(args)
         if source_path is None:
-            raise UserError("No Codex session file found. Pass session_path or import events.")
+            raise UserError("No supported session transcript found. Pass session_path, import events, or add events.")
         project_id = clean_optional(args.get("project_id"))
         task_id = clean_optional(args.get("task_id"))
-        session = session_from_codex_file(source_path, project_id=project_id, task_id=task_id)
+        session = session_from_session_file(source_path, project_id=project_id, task_id=task_id)
         session = self.db.upsert_session(session)
         return {
             "session": public_session(session),
@@ -1281,7 +1282,6 @@ def sharing_storage_provider_key(value: Any) -> str | None:
         "network_folder": "network_folder",
         "local": "local_folder",
         "local_folder": "local_folder",
-        "git": "git_repo",
         "github": "github",
         "github_repo": "github",
         "gitlab": "gitlab",
@@ -1290,7 +1290,6 @@ def sharing_storage_provider_key(value: Any) -> str | None:
         "bitbucket": "bitbucket",
         "bit_bucket": "bitbucket",
         "bitbucket_repo": "bitbucket",
-        "git_repo": "git_repo",
         "docker": "docker_mount",
         "docker_volume": "docker_mount",
         "docker_mount": "docker_mount",
@@ -1498,9 +1497,9 @@ def setup_git_storage_provider(
         "verification_scope": "local_git_worktree",
         "provider_connection_verified": repo_ready,
         "provider_connection_note": (
-            f"Worklog found a local Git worktree. It did not verify {provider_name} remote push/pull access."
+            f"Worklog found a repository checkout. It did not verify {provider_name} remote push/pull access."
             if repo_ready
-            else f"Worklog needs a local Git worktree before it can configure a {provider_name}-backed shared project."
+            else f"Worklog needs a repository checkout before it can configure a {provider_name}-backed shared project."
         ),
         "suggested_roots": suggested_roots,
         "resulting_project_dir_examples": [
@@ -1534,7 +1533,6 @@ def git_provider_display_name(storage_provider: str) -> str:
         "github": "GitHub",
         "gitlab": "GitLab",
         "bitbucket": "Bitbucket",
-        "git_repo": "Git",
     }
     return names.get(storage_provider, "Git")
 
@@ -1627,7 +1625,7 @@ def shared_storage_provider_guidance(project_id: str, backend: str) -> dict[str,
         ],
         "notes": [
             "Choose the storage provider before choosing the shared root path.",
-            "Mounted-folder providers use `shared_directory`; GitHub, GitLab, Bitbucket, and local Git repositories use `git_repo`.",
+            "Mounted-folder providers use `shared_directory`; GitHub, GitLab, and Bitbucket use `git_repo`.",
             "Do not infer the storage provider from an example path or mounted folder name.",
             "After the user chooses a provider, call Worklog again with `storage_provider` to get path suggestions for that provider.",
         ],
@@ -1653,7 +1651,6 @@ def storage_provider_summary(backend: str, storage_provider: str) -> dict[str, A
         "github": "Local checkout of a GitHub repository.",
         "gitlab": "Local checkout of a GitLab repository.",
         "bitbucket": "Local checkout of a Bitbucket repository.",
-        "git_repo": "Local Git repository root.",
     }
     return {
         "storage_provider": storage_provider,
@@ -2301,7 +2298,7 @@ def schemas() -> list[dict[str, Any]]:
         ),
         schema(
             "worklog_capture_session",
-            "Capture a Codex JSONL session file as local source events.",
+            "Capture a supported host JSONL transcript, such as Claude Code or Codex, as local source events.",
             {
                 "session_path": {"type": "string"},
                 "project_id": {"type": "string"},
@@ -2338,7 +2335,7 @@ def schemas() -> list[dict[str, Any]]:
         ),
         schema(
             "worklog_draft_session_log",
-            "Draft a reviewable session log. Captures the current session first by default.",
+            "Draft a reviewable session log. Captures the current host transcript first by default when available.",
             {
                 "session_id": {"type": "string"},
                 "project_id": {"type": "string"},
@@ -2512,14 +2509,14 @@ def empty_session(
     }
 
 
-def session_from_codex_file(
+def session_from_session_file(
     path: Path,
     *,
     project_id: str | None,
     task_id: str | None,
 ) -> dict[str, Any]:
     session_id = session_id_from_file(path) or uid("session")
-    session = empty_session(session_id, source="codex_jsonl", project_id=project_id, task_id=task_id)
+    session = empty_session(session_id, source=session_file_source(path), project_id=project_id, task_id=task_id)
     session["source_meta"] = {"path": str(path)}
     events: list[dict[str, Any]] = []
     with path.open("r", encoding="utf-8") as handle:
@@ -2530,12 +2527,21 @@ def session_from_codex_file(
                 record = json.loads(line)
             except json.JSONDecodeError:
                 continue
-            event = codex_record_to_event(record, session_id=session_id, index=index, path=path)
+            event = session_record_to_event(record, session_id=session_id, index=index, path=path)
             if event:
                 events.append(event)
     session["events"] = sorted(unique_by_id(events), key=lambda item: (item["at"], item["id"]))
     touch_session_times(session)
     return session
+
+
+def session_file_source(path: Path) -> str:
+    lower_parts = {part.lower() for part in path.parts}
+    if ".claude" in lower_parts:
+        return "claude_jsonl"
+    if ".codex" in lower_parts:
+        return "codex_jsonl"
+    return "session_jsonl"
 
 
 def session_from_event_file(
@@ -2603,6 +2609,101 @@ def codex_record_to_event(
         "text": squeeze(text, MAX_EVENT_TEXT),
         "meta": {"source_path": str(path), "line": index, "codex_type": payload_type},
     }
+
+
+def session_record_to_event(
+    record: dict[str, Any],
+    *,
+    session_id: str,
+    index: int,
+    path: Path,
+) -> dict[str, Any] | None:
+    event = codex_record_to_event(record, session_id=session_id, index=index, path=path)
+    if event:
+        return event
+    return claude_record_to_event(record, session_id=session_id, index=index, path=path)
+
+
+def claude_record_to_event(
+    record: dict[str, Any],
+    *,
+    session_id: str,
+    index: int,
+    path: Path,
+) -> dict[str, Any] | None:
+    record_type = str(record.get("type") or "")
+    message = record.get("message")
+    content: Any = None
+    role = record_type
+    if isinstance(message, dict):
+        role = str(message.get("role") or role)
+        content = message.get("content")
+    elif "content" in record:
+        content = record.get("content")
+    elif "result" in record:
+        content = record.get("result")
+
+    text = claude_content_to_text(content)
+    subtype = clean_optional(record.get("subtype"))
+    if not text and record_type == "system" and subtype in {"away_summary", "stop_hook_summary", "local_command"}:
+        text = flatten_text(record.get("summary") or record.get("text") or record.get("content") or "")
+    if not text:
+        return None
+
+    if role == "user" or record_type == "user":
+        speaker = "user"
+        kind = "message"
+    elif role == "assistant" or record_type == "assistant":
+        speaker = "assistant"
+        kind = "message"
+    elif record_type in {"tool_result", "tool_use"}:
+        speaker = "tool"
+        kind = record_type
+    elif record_type == "system":
+        speaker = "system"
+        kind = subtype or "system"
+    else:
+        speaker = "system"
+        kind = record_type or "event"
+
+    return {
+        "id": str(record.get("uuid") or record.get("id") or stable_event_id(session_id, index, text)),
+        "at": str(record.get("timestamp") or record.get("created_at") or now()),
+        "speaker": speaker,
+        "kind": kind,
+        "text": squeeze(text, MAX_EVENT_TEXT),
+        "meta": {
+            "source_path": str(path),
+            "line": index,
+            "claude_type": record_type,
+            "claude_subtype": subtype,
+        },
+    }
+
+
+def claude_content_to_text(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, list):
+        return "\n".join(part for part in (claude_content_to_text(item) for item in value) if part)
+    if isinstance(value, dict):
+        block_type = str(value.get("type") or "")
+        if block_type == "thinking":
+            return ""
+        if block_type == "text":
+            return flatten_text(value.get("text"))
+        if block_type == "tool_use":
+            name = clean_optional(value.get("name")) or "tool"
+            tool_input = value.get("input")
+            if tool_input:
+                return f"Tool use: {name} {squeeze(json.dumps(tool_input, sort_keys=True), 1000)}"
+            return f"Tool use: {name}"
+        if block_type == "tool_result":
+            return "Tool result: " + flatten_text(value.get("content") or value.get("result") or "")
+        return flatten_text(value)
+    return str(value)
 
 
 def generic_record_to_event(record: Any, session_id: str, index: int) -> dict[str, Any]:
@@ -3014,7 +3115,7 @@ def render_project_start(
             "Sharing setup:",
             "- Ask whether this project is local-only or shared with team members.",
             "- If shared, run the storage setup in order: suggest providers, user selects provider, suggest paths for that provider, user selects path.",
-            "- Recommend `shared_directory` for mounted Google Drive/Dropbox/OneDrive/network/Docker paths, `git_repo` for GitHub/GitLab/Bitbucket/local Git repo roots, or `connector_payload` when an external connector must publish the approved artifacts.",
+            "- Recommend `shared_directory` for mounted Google Drive/Dropbox/OneDrive/network/Docker paths, `git_repo` for GitHub/GitLab/Bitbucket repository checkouts, or `connector_payload` when an external connector must publish the approved artifacts.",
             "- If the user has not selected a provider, call `worklog_configure_project_sharing` without `storage_provider` to get provider options.",
             "- After the user selects a provider, call `worklog_configure_project_sharing` with `storage_provider` to get path options for that provider.",
             "- Do not configure sharing until the user explicitly confirms both the selected provider and selected path.",
@@ -3811,7 +3912,16 @@ def find_session_file(args: dict[str, Any]) -> Path | None:
     if explicit:
         path = Path(explicit).expanduser()
         return path if path.is_file() else None
-    for name in ("CODEX_SESSION_PATH", "CODEX_TRANSCRIPT_PATH", "CODEX_CONVERSATION_PATH"):
+    for name in (
+        "WORKLOG_SESSION_PATH",
+        "WORKLOG_TRANSCRIPT_PATH",
+        "CLAUDE_SESSION_PATH",
+        "CLAUDE_TRANSCRIPT_PATH",
+        "CLAUDE_CONVERSATION_PATH",
+        "CODEX_SESSION_PATH",
+        "CODEX_TRANSCRIPT_PATH",
+        "CODEX_CONVERSATION_PATH",
+    ):
         value = os.environ.get(name)
         if value and Path(value).expanduser().is_file():
             return Path(value).expanduser()
@@ -3824,7 +3934,15 @@ def find_session_file(args: dict[str, Any]) -> Path | None:
 
 
 def current_session_id() -> str | None:
-    for name in ("CODEX_THREAD_ID", "CODEX_SESSION_ID", "CODEX_TASK_ID", "CODEX_CONVERSATION_ID"):
+    for name in (
+        "CLAUDE_CODE_SESSION_ID",
+        "CLAUDE_SESSION_ID",
+        "CLAUDE_CONVERSATION_ID",
+        "CODEX_THREAD_ID",
+        "CODEX_SESSION_ID",
+        "CODEX_TASK_ID",
+        "CODEX_CONVERSATION_ID",
+    ):
         value = clean_optional(os.environ.get(name))
         if value:
             return value
@@ -3832,19 +3950,46 @@ def current_session_id() -> str | None:
 
 
 def find_session_by_id(session_id: str) -> Path | None:
-    root = Path.home() / ".codex" / "sessions"
-    if not root.exists():
-        return None
-    matches = [path for path in root.rglob(f"*{session_id}.jsonl") if path.is_file()]
+    matches: list[Path] = []
+    for root in session_search_roots():
+        if root.exists():
+            matches.extend(path for path in root.rglob(f"*{session_id}.jsonl") if path.is_file())
     return max(matches, key=lambda path: path.stat().st_mtime) if matches else None
 
 
 def newest_session_file() -> Path | None:
-    root = Path.home() / ".codex" / "sessions"
-    if not root.exists():
-        return None
-    files = [path for path in root.rglob("*.jsonl") if path.is_file()]
+    files: list[Path] = []
+    for root in session_search_roots():
+        if root.exists():
+            files.extend(path for path in root.rglob("*.jsonl") if path.is_file())
     return max(files, key=lambda path: path.stat().st_mtime) if files else None
+
+
+def session_search_roots() -> list[Path]:
+    roots: list[Path] = []
+    claude_config_dir = clean_optional(os.environ.get("CLAUDE_CONFIG_DIR"))
+    if claude_config_dir:
+        roots.append(Path(claude_config_dir).expanduser() / "projects")
+    roots.extend(
+        [
+            Path.home() / ".claude" / "projects",
+            Path.home() / ".codex" / "sessions",
+        ]
+    )
+    return dedupe_paths(roots)
+
+
+def dedupe_paths(paths: list[Path]) -> list[Path]:
+    seen: set[str] = set()
+    output: list[Path] = []
+    for path in paths:
+        expanded = path.expanduser()
+        key = str(expanded)
+        if key in seen:
+            continue
+        seen.add(key)
+        output.append(expanded)
+    return output
 
 
 def session_id_from_file(path: Path) -> str | None:
@@ -3870,6 +4015,9 @@ def session_id_from_file(path: Path) -> str | None:
                     for key in ("session_id", "thread_id", "conversation_id", "id"):
                         if clean_optional(payload.get(key)):
                             return str(payload[key]).strip()
+                for key in ("sessionId", "session_id", "thread_id", "conversation_id", "id", "uuid"):
+                    if clean_optional(record.get(key)):
+                        return str(record[key]).strip()
     except OSError:
         return None
     return None
