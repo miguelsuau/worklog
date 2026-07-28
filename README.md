@@ -162,6 +162,7 @@ packages/codex/
   .codex-plugin/plugin.json
   .mcp.json
   skills/worklog/SKILL.md
+  skills/worklog/agents/openai.yaml
   scripts/worklog_mcp_server.py
   lib/worklog/
 ```
@@ -172,8 +173,8 @@ skill, and Codex expects plugin-bundled skills under `skills/<name>/`.
 
 Codex uses `$` mentions for skills, so the Codex package includes a bundled
 `worklog` skill in addition to the MCP server. The package uses Codex's unified
-bundled-content presentation so the composer can show Worklog as one clean
-entry.
+bundled-content presentation plus skill UI metadata so the composer can show
+Worklog as one clean entry.
 
 Claude is the first supported beta target. Codex packaging is included so it can be tested from the same source.
 

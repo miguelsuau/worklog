@@ -15,6 +15,7 @@ BODY_PATH = ROOT / "skill" / "worklog.body.md"
 METADATA_PATH = ROOT / "plugin.metadata.json"
 LAUNCHER_PATH = ROOT / "launcher" / "worklog_mcp_server.py"
 PLACEHOLDER = "{{HOST_INVOCATION_NOTE}}"
+CODEX_SKILL_AGENT_PATH = ROOT / "packages" / "codex" / "skills" / "worklog" / "agents" / "openai.yaml"
 
 SKILL_HOSTS = {
     "claude": {
@@ -85,6 +86,15 @@ def render_skill(host: dict[str, Any], body: str) -> str:
         "---\n\n"
         "# Worklog\n\n"
         f"{body.replace(PLACEHOLDER, host['invocation_note']).rstrip()}\n"
+    )
+
+
+def render_codex_skill_agent(metadata: dict[str, Any]) -> str:
+    return (
+        "interface:\n"
+        f"  display_name: \"{metadata['display_name']}\"\n"
+        f"  short_description: \"{metadata['descriptions']['short']}\"\n"
+        "  default_prompt: \"Use $worklog to load or update reviewed project context.\"\n"
     )
 
 
@@ -231,6 +241,7 @@ def generated_files() -> dict[Path, str]:
     launcher = LAUNCHER_PATH.read_text()
     outputs = generated_manifests(metadata)
     outputs.update(generated_mcp_configs())
+    outputs[CODEX_SKILL_AGENT_PATH] = render_codex_skill_agent(metadata)
 
     for host in SKILL_HOSTS.values():
         outputs[host["skill_path"]] = render_skill(host, body)

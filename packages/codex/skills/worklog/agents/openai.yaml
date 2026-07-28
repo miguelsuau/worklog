@@ -1,0 +1,4 @@
+interface:
+  display_name: "Worklog"
+  short_description: "Reviewed session logs and project context for agent work."
+  default_prompt: "Use $worklog to load or update reviewed project context."
