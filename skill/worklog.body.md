@@ -34,7 +34,7 @@ When the invocation includes a task after the command, strip the invocation mark
 3. If the project is unclear, ask the user which project this belongs to before creating a new one.
 4. If a matching project has approved context, call `worklog_resume_context` and use it before doing the work.
 5. Complete the user's requested work normally.
-6. At the end of the work session, run the Session Log Review workflow unless the user says not to.
+6. At the end of the work session, run the Session Log Review workflow only when the conversation produced substantive project work or the user explicitly asks to log it. Do not prompt for session-log approval when the only activity was Worklog project setup/configuration, template or sharing configuration, status inspection, resume-context loading, or log review/approval.
 
 If the user invokes Worklog only to inspect or manage logs, follow the relevant setup, resume, session-log, or project-log workflow instead of doing unrelated work.
 
@@ -53,6 +53,8 @@ When a project starts, help the user decide how the session log and project log 
 9. Work with the user to refine section names, ordering, and how the assistant should author project-level rollups from reviewed session logs.
 10. Call `worklog_set_project_templates` only after explicit user approval. Pass the exact approved `session_log_template`, `project_log_template`, `confirmed_by_user: true`, and the user's exact `confirmation_quote`.
 11. For shared projects, do not combine provider selection and path selection. The workflow is: suggest providers, user selects provider, Worklog builds/inspects that provider backend, Worklog suggests paths for that provider, user selects path, then configure sharing. If the storage provider is missing, ask a direct provider question even if the user has approved a path. Never infer the provider from an example path, mounted folder name, or "path looks good." When the user selects a path in response to Worklog's path prompt, treat that selection as the sharing confirmation: call the tool immediately with `confirmed_by_user: true` and `confirmation_quote` set to the user's exact path-selection message. Do not ask the user to repeat a boilerplate confirmation sentence.
+
+Project setup/configuration alone is not substantive project work. After finishing setup, templates, sharing, or membership configuration, summarize the result and stop unless the user explicitly asks to create a session log for that setup session.
 
 Templates are flexible. They may contain any section names and any structure the user wants. Worklog stores the approved templates; it does not invent them. The update tools accept a `sections` object or a single `section` plus `items`/`text`, so use those for custom formats.
 
@@ -93,11 +95,13 @@ If a contributor approves a session log but lacks project-log approval permissio
 
 1. Capture or import source material with `worklog_capture_session`, `worklog_import_events`, or `worklog_add_event` when needed. `worklog_capture_session` can auto-capture supported host transcripts, including Claude Code and Codex JSONL files, when the host writes them locally.
 2. If auto-capture reports that no supported transcript is available, do not stop the review flow. Use `worklog_add_event` to add a concise assistant-authored source event summarizing the work that happened in the current conversation, then call `worklog_draft_session_log` with `capture: false` and the returned `session_id`.
-3. If project templates are missing or the user wants to change the format, run the Project Setup workflow first.
-4. Call `worklog_draft_session_log`.
-5. Show the rendered session log and ask the user whether to edit or approve it.
-6. Use `worklog_edit_session_log` for requested edits. Prefer the flexible `sections` object for custom formats.
-7. Call `worklog_approve_session_log` only after explicit user approval. Pass `confirmed_by_user: true` and the user's exact `confirmation_quote`.
+3. Session logs should cover a bounded slice of source events. By default, `worklog_draft_session_log` selects only new source events since the latest approved session log for the same source session and project. Use `from_event_id`, `after_event_id`, or `to_event_id` only when the user intentionally wants a different range.
+4. If project templates are missing or the user wants to change the format, run the Project Setup workflow first.
+5. Call `worklog_draft_session_log` to create a source-bounded draft seed. Worklog returns the bounded source-event slice as private authoring context; do not paste raw source events into chat unless the user asks to inspect them.
+6. As the assistant, author the session log sections from the bounded source-event slice and the user's approved session-log template, then call `worklog_edit_session_log` with the authored sections.
+7. Show the rendered session log and ask the user whether to edit or approve it.
+8. Use `worklog_edit_session_log` for requested edits. Prefer the flexible `sections` object for custom formats.
+9. Call `worklog_approve_session_log` only after explicit user approval. Pass `confirmed_by_user: true`, the user's exact `confirmation_quote`, and the reviewed `session_log_id`.
 
 Do not approve a session log without a `project_id`. Ask the user or edit the draft to add one.
 
@@ -107,6 +111,17 @@ For shared projects, approved session logs may be published even when the curren
 
 1. After a session log is approved, call `worklog_draft_project_log` with the approved `session_log_id` or the project `project_id` and no sections. With a shared project, passing `project_id` lets Worklog surface all pending approved session logs that are not yet incorporated.
 2. As the assistant, author the project-log rollup yourself. Use judgment to preserve useful previous project state, incorporate the new approved session log, and place facts only in sections where they semantically belong.
+
+Project logs are resume state, not an audit trail. Prefer durable facts future work needs:
+
+- current behavior or project state
+- durable decisions and rationale
+- active workstreams
+- risks, constraints, or unresolved unknowns
+- next actions
+
+Do not carry over routine session details such as exact commands, exhaustive file lists, validation receipts, intermediate status updates, or conversational Q&A unless they materially affect future project decisions or resumption. Keep those details in the session log.
+
 3. Call `worklog_draft_project_log` again with the same `session_log_id` or `session_log_ids` plus the authored `sections` or `fields`. Worklog stores this as a draft; it should not mechanically generate the rollup.
 4. Show the rendered project log draft and ask whether the user wants edits or approval.
 5. Use `worklog_edit_project_log` for requested edits. Prefer the flexible `sections` object for custom formats.
@@ -122,6 +137,10 @@ For shared projects, only a project approver should approve the project log. If 
 - Keep source events local and out of chat unless the user asks to inspect them.
 - The user's template is authoritative. Preserve their section names and format.
 - If no user-approved template is configured, do not draft logs yet. Start project setup first.
+- Do not ask the user to approve a session log when the only completed work was Worklog setup/configuration, status inspection, resume-context loading, or log review/approval.
+- Do not draft a new session log from an entire source session when an approved session log already covers earlier events in the same source session and project; continue from the prior approved log's source-event boundary unless the user explicitly requests a different range.
+- Session-log content should be authored by the assistant from the bounded source-event slice and the user's template; Worklog's deterministic draft seed should handle IDs, timestamps, template attachment, source-event range metadata, and rendering, not semantic classification.
 - Never create or set up a new project before checking whether the work belongs to an existing Worklog project.
 - Project-log rollups must be authored by the assistant from reviewed Worklog state. Do not expect Worklog to automatically classify or copy session-log content into project-log sections.
+- Project logs should preserve resumable durable state; session logs should preserve session-level evidence, validation details, and execution receipts.
 - If a prompt starts with `/worklog` or `\worklog`, do not treat it as a shell command or path. Treat it as an explicit request to use Worklog.
