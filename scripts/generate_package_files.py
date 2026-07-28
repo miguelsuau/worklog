@@ -47,6 +47,22 @@ SKILL_HOSTS = {
             "explicit Worklog invocation."
         ),
     },
+    "codex": {
+        "skill_path": ROOT / "packages" / "codex" / "skills" / "worklog" / "SKILL.md",
+        "skill_description": (
+            "Use Worklog when the user explicitly invokes $worklog, /worklog, \\worklog, "
+            "or @worklog, asks to use Worklog, or wants to track, resume, or review "
+            "project work; create user-approved templates, capture session logs, "
+            "author project-log rollups, and generate resume context using the "
+            "installed Worklog MCP tools."
+        ),
+        "invocation_note": (
+            "Codex can invoke this skill with `$worklog` or `/worklog`. ChatGPT plugin "
+            "surfaces support `@worklog`. `\\worklog` is a command-like text "
+            "convention; if the host passes it through in the prompt, treat it exactly "
+            "like an explicit Worklog invocation."
+        ),
+    },
 }
 
 LAUNCHER_PATHS = [
@@ -115,6 +131,7 @@ def generated_manifests(metadata: dict[str, Any]) -> dict[Path, str]:
         "author": author,
         "license": metadata["license"],
         "keywords": metadata["keywords"],
+        "skills": "./skills/",
         "mcpServers": "./.mcp.json",
         "interface": {
             "displayName": metadata["display_name"],
