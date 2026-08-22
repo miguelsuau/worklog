@@ -10,6 +10,10 @@ Worklog is a small local ledger for agent-assisted work:
 
 This file is intentionally self-contained and does not depend on the earlier
 prototype implementation.
+
+Package copies under packages/*/lib/worklog/mcp_server.py are generated from
+this shared source by scripts/build_packages.sh. Edit src/worklog/mcp_server.py,
+not those vendored copies.
 """
 
 from __future__ import annotations
@@ -640,9 +644,23 @@ class Server:
             self.db.write("sessions", session["id"], session)
         templates = self.db.project_settings(session.get("project_id"))
         require_configured_template(templates["session_log_template"], "session_log_template")
-        draft = make_session_log(session, templates["session_log_template"])
+        events = select_session_log_events(self.db, session, args)
+        if not events:
+            raise UserError(
+                "No new source events are available for this session log. "
+                "Provide from_event_id, after_event_id, or to_event_id "
+                "to draft a different source-event range."
+            )
+        draft = make_session_log_from_events(session, templates["session_log_template"], events)
         self.db.write("session_logs", draft["id"], draft)
-        return {"session_log": draft, "text": render_session_log(draft)}
+        return {
+            "session_log": draft,
+            "source_events": public_source_events(events),
+            "next_required_action": "llm_author_session_log_then_call_worklog_edit_session_log",
+            "text": render_session_log(draft)
+            + "\n\n"
+            + render_session_log_authoring_next_step(),
+        }
 
     def show_session_log(self, args: dict[str, Any]) -> dict[str, Any]:
         log = self.db.read("session_logs", required(args, "session_log_id"))
@@ -2338,12 +2356,15 @@ def schemas() -> list[dict[str, Any]]:
         ),
         schema(
             "worklog_draft_session_log",
-            "Draft a reviewable session log. Captures the current host transcript first by default when available.",
+            "Create a source-bounded session-log draft seed. Captures the current host transcript first by default when available, continues after the latest approved session log for the same source session/project unless explicit range arguments are provided, and returns the bounded source-event slice as private authoring context for the assistant.",
             {
                 "session_id": {"type": "string"},
                 "project_id": {"type": "string"},
                 "capture": {"type": "boolean"},
                 "session_path": {"type": "string"},
+                "from_event_id": {"type": "string"},
+                "after_event_id": {"type": "string"},
+                "to_event_id": {"type": "string"},
             },
             [],
         ),
@@ -2753,28 +2774,18 @@ def merge_sessions(existing: dict[str, Any] | None, incoming: dict[str, Any]) ->
 
 
 def make_session_log(session: dict[str, Any], template: dict[str, Any]) -> dict[str, Any]:
-    events = session["events"]
+    return make_session_log_from_events(session, template, session["events"])
+
+
+def make_session_log_from_events(
+    session: dict[str, Any],
+    template: dict[str, Any],
+    events: list[dict[str, Any]],
+) -> dict[str, Any]:
     created = now()
     first_user = first_text(events, "user")
-    final_assistant = last_text(events, "assistant")
-    summary_bits = [f"{len(events)} source events captured"]
-    if first_user:
-        summary_bits.append(f"started with: {strip_terminal_punctuation(squeeze(first_user, 180))}")
-    if final_assistant:
-        summary_bits.append(f"ended with: {strip_terminal_punctuation(squeeze(final_assistant, 180))}")
     source_event_ids = [event["id"] for event in events]
-    if len(source_event_ids) > 5:
-        source_event_ids = source_event_ids[:3] + source_event_ids[-2:]
-    draft_values = {
-        "summary": "; ".join(summary_bits) + ".",
-        "outcomes": collect_lines(events, ("done", "created", "updated", "implemented", "fixed", "validated", "complete")),
-        "decisions": collect_lines(events, ("decide", "decision", "choose", "rename", "prefer", "keep", "must", "should")),
-        "questions": collect_questions(events),
-        "next_actions": collect_lines(events, ("next", "todo", "remaining", "follow up", "follow-up", "need to")),
-        "notes": [],
-        "validation": collect_lines(events, ("test", "validated", "validation", "passed", "failed", "checked", "smoke")),
-    }
-    sections = draft_sections(template, draft_values)
+    source_range = source_event_range(session, events)
     return {
         "id": uid("session_log"),
         "session_id": session["id"],
@@ -2787,10 +2798,100 @@ def make_session_log(session: dict[str, Any], template: dict[str, Any]) -> dict[
         "approved_at": None,
         "approved_by": None,
         "template": template,
-        "sections": sections,
+        "sections": empty_sections(template),
         "source_event_count": len(events),
         "source_event_ids": dedupe(source_event_ids),
+        "source_event_range": source_range,
     }
+
+
+def source_event_range(session: dict[str, Any], events: list[dict[str, Any]]) -> dict[str, Any]:
+    if not events:
+        return {
+            "session_id": session.get("id"),
+            "event_count": 0,
+        }
+    ordinals = {event.get("id"): index for index, event in enumerate(session.get("events", []), 1)}
+    start = events[0]
+    end = events[-1]
+    return {
+        "session_id": session.get("id"),
+        "event_count": len(events),
+        "start_event_id": start.get("id"),
+        "start_at": start.get("at"),
+        "start_speaker": start.get("speaker"),
+        "start_kind": start.get("kind"),
+        "start_ordinal": ordinals.get(start.get("id")),
+        "end_event_id": end.get("id"),
+        "end_at": end.get("at"),
+        "end_speaker": end.get("speaker"),
+        "end_kind": end.get("kind"),
+        "end_ordinal": ordinals.get(end.get("id")),
+    }
+
+
+def select_session_log_events(db: Store, session: dict[str, Any], args: dict[str, Any]) -> list[dict[str, Any]]:
+    events = list(session.get("events", []))
+    if not events:
+        return []
+
+    from_event_id = clean_optional(args.get("from_event_id"))
+    after_event_id = clean_optional(args.get("after_event_id"))
+    to_event_id = clean_optional(args.get("to_event_id"))
+    if from_event_id and after_event_id:
+        raise UserError("Use either from_event_id or after_event_id, not both.")
+
+    if not from_event_id and not after_event_id:
+        after_event_id = latest_session_log_end_event_id(db, session)
+
+    start = 0
+    if after_event_id:
+        index = event_index(events, after_event_id)
+        if index is None:
+            raise UserError(f"No source event found for after_event_id `{after_event_id}`.")
+        start = index + 1
+    if from_event_id:
+        index = event_index(events, from_event_id)
+        if index is None:
+            raise UserError(f"No source event found for from_event_id `{from_event_id}`.")
+        start = index
+
+    end = len(events)
+    if to_event_id:
+        index = event_index(events, to_event_id)
+        if index is None:
+            raise UserError(f"No source event found for to_event_id `{to_event_id}`.")
+        end = index + 1
+
+    return events[start:end] if start <= end else []
+
+
+def latest_session_log_end_event_id(db: Store, session: dict[str, Any]) -> str | None:
+    project_id = clean_optional(session.get("project_id"))
+    if not project_id:
+        return None
+    candidates: list[tuple[int, str]] = []
+    for log in db.session_logs(project_id, status="approved"):
+        if log.get("session_id") != session.get("id"):
+            continue
+        source_range = log.get("source_event_range")
+        if not isinstance(source_range, dict):
+            continue
+        event_id = clean_optional(source_range.get("end_event_id"))
+        if event_id:
+            index = event_index(session.get("events", []), event_id)
+            if index is not None:
+                candidates.append((index, event_id))
+    if not candidates:
+        return None
+    return max(candidates, key=lambda item: item[0])[1]
+
+
+def event_index(events: list[dict[str, Any]], event_id: str) -> int | None:
+    for index, event in enumerate(events):
+        if event.get("id") == event_id:
+            return index
+    return None
 
 
 def make_project_log(
@@ -2940,14 +3041,58 @@ def render_session_log(log: dict[str, Any]) -> str:
         output.append(f"- project_id: `{log['project_id']}`")
     if log.get("task_id"):
         output.append(f"- task_id: `{log['task_id']}`")
+    render_source_event_range(output, log)
     render_template_sections(output, log)
     attention = []
     if not log.get("project_id"):
         attention.append("Add `project_id` before approval.")
     if not any(section_has_content(value) for value in sections_from_log(log).values()):
-        attention.append("This draft has little durable project state; review the summary carefully.")
+        attention.append("This draft seed has no authored session-log sections yet; the assistant should author and edit it before approval.")
     add_section(output, "Attention", attention)
     return "\n".join(output)
+
+
+def public_source_events(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [
+        {
+            "id": event.get("id"),
+            "at": event.get("at"),
+            "speaker": event.get("speaker"),
+            "kind": event.get("kind"),
+            "text": event.get("text", ""),
+        }
+        for event in events
+    ]
+
+
+def render_session_log_authoring_next_step() -> str:
+    return lines(
+        "Next:",
+        "- The assistant should author the session log from the bounded source-event slice and the user's session-log template.",
+        "- Keep raw source events out of chat unless the user asks to inspect them.",
+        "- Then call `worklog_edit_session_log` with the authored sections before asking the user to approve.",
+    )
+
+
+def render_source_event_range(output: list[str], log: dict[str, Any]) -> None:
+    source_range = log.get("source_event_range")
+    if not isinstance(source_range, dict):
+        if log.get("source_event_count") is not None:
+            output.append(f"- source_events: {log.get('source_event_count')}")
+        return
+    output.append(f"- source_events: {source_range.get('event_count', log.get('source_event_count', 0))}")
+    start = clean_optional(source_range.get("start_event_id"))
+    end = clean_optional(source_range.get("end_event_id"))
+    if not start or not end:
+        return
+    start_at = clean_optional(source_range.get("start_at")) or ""
+    end_at = clean_optional(source_range.get("end_at")) or ""
+    start_kind = clean_optional(source_range.get("start_kind")) or "event"
+    end_kind = clean_optional(source_range.get("end_kind")) or "event"
+    start_ordinal = source_range.get("start_ordinal")
+    end_ordinal = source_range.get("end_ordinal")
+    output.append(f"- source_event_start: `{start}` ({start_kind}, #{start_ordinal or '?'}, {start_at})")
+    output.append(f"- source_event_end: `{end}` ({end_kind}, #{end_ordinal or '?'}, {end_at})")
 
 
 def render_project_log(log: dict[str, Any]) -> str:
@@ -3188,7 +3333,7 @@ def render_template_authoring_lines(brief: dict[str, Any]) -> list[str]:
             "- `project_log_template`: name, description, sections",
             "",
             "Each section should include `key`, `title`, and `kind` (`text` or `list`).",
-            "`draft_from` can guide rough session-log drafting. `rollup_from` on project sections is only a hint for the assistant; Worklog does not automatically copy content into project sections.",
+            "`draft_from` and `rollup_from` are hints for the assistant when authoring reviewed logs; Worklog does not automatically classify or copy content into template sections.",
             "",
             "Available source channels:",
             "- " + ", ".join(TEMPLATE_AUTHORING_GUIDANCE["draft_from_options"]),
@@ -4040,35 +4185,8 @@ def touch_session_times(session: dict[str, Any]) -> None:
     session["updated_at"] = now()
 
 
-def collect_lines(events: list[dict[str, Any]], needles: tuple[str, ...]) -> list[str]:
-    values = []
-    for event in events:
-        text = event["text"]
-        lowered = text.lower()
-        if any(needle in lowered for needle in needles):
-            values.append(squeeze(text, 220))
-    return dedupe(values)[:12]
-
-
-def collect_questions(events: list[dict[str, Any]]) -> list[str]:
-    values = []
-    for event in events:
-        text = event["text"]
-        lowered = text.lower()
-        if "?" in text or "question" in lowered or "unclear" in lowered:
-            values.append(squeeze(text, 220))
-    return dedupe(values)[:10]
-
-
 def first_text(events: list[dict[str, Any]], speaker: str) -> str | None:
     for event in events:
-        if event.get("speaker") == speaker and event.get("text"):
-            return event["text"]
-    return None
-
-
-def last_text(events: list[dict[str, Any]], speaker: str) -> str | None:
-    for event in reversed(events):
         if event.get("speaker") == speaker and event.get("text"):
             return event["text"]
     return None
@@ -4185,10 +4303,6 @@ def squeeze(text: str, limit: int) -> str:
     if len(compact) <= limit:
         return compact
     return compact[: max(0, limit - 14)].rstrip() + " ... <trimmed>"
-
-
-def strip_terminal_punctuation(text: str) -> str:
-    return text.rstrip().rstrip(".!?")
 
 
 def stable_event_id(session_id: str, index: int, text: str) -> str:
