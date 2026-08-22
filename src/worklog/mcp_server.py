@@ -10,6 +10,10 @@ Worklog is a small local ledger for agent-assisted work:
 
 This file is intentionally self-contained and does not depend on the earlier
 prototype implementation.
+
+Package copies under packages/*/lib/worklog/mcp_server.py are generated from
+this shared source by scripts/build_packages.sh. Edit src/worklog/mcp_server.py,
+not those vendored copies.
 """
 
 from __future__ import annotations
