@@ -50,13 +50,13 @@ backend.
 For shared projects, the assistant should guide setup in stages:
 
 1. Ask whether the project should be shared.
-2. Ask the user to choose a storage provider, such as Google Drive, Dropbox,
-   OneDrive, a network folder, a Docker-mounted folder, GitHub, GitLab, or
-   Bitbucket.
+2. Ask the user to choose a sharing provider, such as Google Drive, Dropbox,
+   OneDrive, a network folder, a Docker-mounted folder, GitHub, GitLab,
+   Bitbucket, or a connector-backed project-management system such as Linear.
 3. Build or inspect the selected provider setup.
-4. Suggest provider-specific paths or repositories.
+4. Suggest provider-specific paths, repositories, or connector targets.
 5. Configure the project only after the user confirms the provider and
-   location.
+   location or connector target.
 
 Worklog also separates project roles:
 
@@ -207,7 +207,7 @@ $worklog
 
 ## Beta Testing Notes
 
-Worklog stores reviewed logs locally, and shared projects may publish approved logs to a shared folder or repository. For sensitive work, confirm the storage location and access permissions before use.
+Worklog stores reviewed logs locally, and shared projects may publish approved logs to a shared folder or repository. For sensitive work, confirm the shared destination and access permissions before use.
 
 When reporting bugs, include:
 
@@ -217,4 +217,4 @@ When reporting bugs, include:
 - command or prompt used
 - expected behavior
 - actual behavior
-- whether the project was local-only or shared, including the storage provider for shared projects
+- whether the project was local-only or shared, including the sharing provider for shared projects

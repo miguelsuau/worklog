@@ -34,9 +34,71 @@ DEFAULT_STORE = str(Path.home() / ".worklog" / "store")
 MAX_EVENT_TEXT = 5000
 SHARED_LAYOUT_VERSION = 1
 SHARING_BACKENDS = {"shared_directory", "git_repo", "connector_payload"}
-MOUNTED_STORAGE_PROVIDERS = ["google_drive", "dropbox", "onedrive", "network_folder", "local_folder", "docker_mount"]
-CLOUD_SYNC_STORAGE_PROVIDERS = ["google_drive", "dropbox", "onedrive"]
-GIT_STORAGE_PROVIDERS = ["github", "gitlab", "bitbucket"]
+SHARING_PROVIDERS: dict[str, dict[str, Any]] = {
+    "google_drive": {
+        "backend": "shared_directory",
+        "kind": "cloud_sync_path",
+        "display_name": "Google Drive",
+        "description": "Mounted Google Drive folder via Google Drive for desktop.",
+        "requires_cloud_verification": True,
+    },
+    "dropbox": {
+        "backend": "shared_directory",
+        "kind": "cloud_sync_path",
+        "display_name": "Dropbox",
+        "description": "Mounted Dropbox folder.",
+        "requires_cloud_verification": True,
+    },
+    "onedrive": {
+        "backend": "shared_directory",
+        "kind": "cloud_sync_path",
+        "display_name": "OneDrive/SharePoint",
+        "description": "Mounted OneDrive or SharePoint-synced folder.",
+        "requires_cloud_verification": True,
+    },
+    "network_folder": {
+        "backend": "shared_directory",
+        "kind": "mounted_path",
+        "display_name": "Network Folder",
+        "description": "Mounted team or network share.",
+    },
+    "local_folder": {
+        "backend": "shared_directory",
+        "kind": "mounted_path",
+        "display_name": "Local Folder",
+        "description": "Local folder that another sync app or OS sharing layer manages.",
+    },
+    "docker_mount": {
+        "backend": "shared_directory",
+        "kind": "mounted_path",
+        "display_name": "Docker Mount",
+        "description": "Docker bind mount or volume visible to the process running Worklog.",
+    },
+    "github": {
+        "backend": "git_repo",
+        "kind": "git",
+        "display_name": "GitHub",
+        "description": "Local checkout of a GitHub repository.",
+    },
+    "gitlab": {
+        "backend": "git_repo",
+        "kind": "git",
+        "display_name": "GitLab",
+        "description": "Local checkout of a GitLab repository.",
+    },
+    "bitbucket": {
+        "backend": "git_repo",
+        "kind": "git",
+        "display_name": "Bitbucket",
+        "description": "Local checkout of a Bitbucket repository.",
+    },
+    "linear": {
+        "backend": "connector_payload",
+        "kind": "connector",
+        "display_name": "Linear",
+        "description": "Linear project-management or ticketing workspace managed through connector/API/browser tooling.",
+    },
+}
 
 DEFAULT_SESSION_TEMPLATE = {
     "name": "Unconfigured Session Log",
@@ -49,6 +111,12 @@ DEFAULT_PROJECT_TEMPLATE = {
     "description": "No user-approved project log template has been configured yet.",
     "sections": [],
 }
+
+RENDERED_LOG_PRESENTATION_GUIDANCE = (
+    "Present the rendered {log_type} as normal chat content with headings and lists. "
+    "Do not wrap it in a fenced Markdown/code block or otherwise show raw Markdown source "
+    "unless the user explicitly asks for raw Markdown."
+)
 
 TEMPLATE_AUTHORING_GUIDANCE = {
     "purpose": "The LLM proposes project-specific Worklog templates in conversation; Worklog stores only the user-approved result.",
@@ -287,24 +355,32 @@ class Server:
             "confirmation_quote": str(args.get("confirmation_quote")),
         }
         preserve_project_settings_fields(settings, existing)
+        settings["setup_state"] = project_setup_state(self.db, settings)
         self.db.write("project_settings", project_id, settings)
         if sharing_enabled(settings):
             try:
                 sharing_backend(settings["sharing"]).publish_settings(project_id, settings, dry_run=False)
             except UserError:
                 pass
-        return {
+        result = {
             "project_templates": settings,
+            "setup_state": settings["setup_state"],
             "text": render_project_templates(settings),
         }
+        attach_project_setup_next_step(result, settings)
+        return result
 
     def show_project_templates(self, args: dict[str, Any]) -> dict[str, Any]:
         project_id = clean_required(args, "project_id")
         settings = self.db.project_settings(project_id)
-        return {
+        settings["setup_state"] = project_setup_state(self.db, settings)
+        result = {
             "project_templates": settings,
+            "setup_state": settings["setup_state"],
             "text": render_project_templates(settings),
         }
+        attach_project_setup_next_step(result, settings)
+        return result
 
     def configure_project_sharing(self, args: dict[str, Any]) -> dict[str, Any]:
         project_id = clean_required(args, "project_id")
@@ -315,58 +391,90 @@ class Server:
         if mode not in {"create", "join"}:
             raise UserError("mode must be `create` or `join`.")
         actor = actor_from_args(args)
-        storage_provider = sharing_storage_provider_key(args.get("storage_provider"))
-        effective_backend = backend_for_storage_provider(storage_provider, backend_name)
+        sharing_provider = sharing_provider_key(args.get("sharing_provider"))
+        effective_backend = backend_for_sharing_provider(sharing_provider, backend_name)
+        if effective_backend == "connector_payload" and not sharing_provider:
+            permissions = normalize_permission_policy(args.get("permissions"), actor=actor)
+            guidance = sharing_provider_selection_guidance(project_id, effective_backend)
+            return {
+                "project_id": project_id,
+                "backend": effective_backend,
+                "sharing_setup_stage": "choose_sharing_provider",
+                "sharing_provider": None,
+                "shared_location": {},
+                "permissions": permissions,
+                "sharing_provider_guidance": guidance,
+                "next_required_action": "ask_user_to_choose_sharing_provider_then_call_worklog_configure_project_sharing",
+                "text": render_sharing_provider_guidance(project_id, effective_backend, guidance, permissions),
+            }
+        if effective_backend == "connector_payload" and (
+            not has_connector_target(args) or args.get("confirmed_by_user") is not True
+        ):
+            permissions = normalize_permission_policy(args.get("permissions"), actor=actor)
+            provider_setup = setup_sharing_provider(project_id, effective_backend, sharing_provider, args)
+            guidance = connector_target_guidance(project_id, sharing_provider, provider_setup, connector_target_from_args(args))
+            return {
+                "project_id": project_id,
+                "backend": effective_backend,
+                "sharing_setup_stage": "choose_connector_target",
+                "sharing_provider": sharing_provider,
+                "connector_target": connector_target_from_args(args),
+                "permissions": permissions,
+                "sharing_provider_setup": provider_setup,
+                "connector_target_guidance": guidance,
+                "next_required_action": "ask_user_to_choose_connector_target_then_confirm_sharing_setup",
+                "text": render_connector_target_guidance(project_id, sharing_provider, guidance, permissions),
+            }
         if backend_requires_location(effective_backend):
             permissions = normalize_permission_policy(args.get("permissions"), actor=actor)
-            if not storage_provider:
-                guidance = shared_storage_provider_guidance(project_id, backend_name)
+            if not sharing_provider:
+                guidance = sharing_provider_selection_guidance(project_id, backend_name)
                 shared_location = shared_location_from_args(args)
                 if shared_location:
                     guidance["provided_shared_location"] = shared_location
                 return {
                     "project_id": project_id,
                     "backend": backend_name,
-                    "sharing_setup_stage": "choose_storage_provider",
-                    "storage_provider": None,
+                    "sharing_setup_stage": "choose_sharing_provider",
+                    "sharing_provider": None,
                     "shared_location": shared_location,
                     "permissions": permissions,
-                    "storage_provider_guidance": guidance,
-                    "next_required_action": "ask_user_to_choose_storage_provider_then_call_worklog_configure_project_sharing",
-                    "text": render_storage_provider_guidance(project_id, backend_name, guidance, permissions),
+                    "sharing_provider_guidance": guidance,
+                    "next_required_action": "ask_user_to_choose_sharing_provider_then_call_worklog_configure_project_sharing",
+                    "text": render_sharing_provider_guidance(project_id, backend_name, guidance, permissions),
                 }
             if not has_shared_location(args):
-                provider_setup = setup_storage_provider(project_id, effective_backend, storage_provider, args)
-                guidance = shared_location_guidance(project_id, effective_backend, storage_provider, provider_setup=provider_setup)
+                provider_setup = setup_sharing_provider(project_id, effective_backend, sharing_provider, args)
+                guidance = shared_location_guidance(project_id, effective_backend, sharing_provider, provider_setup=provider_setup)
                 return {
                     "project_id": project_id,
                     "backend": effective_backend,
                     "sharing_setup_stage": "choose_shared_location",
-                    "storage_provider": storage_provider,
-                    "storage_provider_setup": provider_setup,
+                    "sharing_provider": sharing_provider,
+                    "sharing_provider_setup": provider_setup,
                     "shared_location": {},
                     "permissions": permissions,
                     "sharing_location_guidance": guidance,
                     "next_required_action": "ask_user_to_choose_shared_location_then_confirm_sharing_setup",
-                    "text": render_shared_location_guidance(project_id, effective_backend, storage_provider, guidance, permissions),
+                    "text": render_shared_location_guidance(project_id, effective_backend, sharing_provider, guidance, permissions),
                 }
-            if storage_provider_requires_cloud_verification(storage_provider):
-                provider_setup = setup_storage_provider(project_id, effective_backend, storage_provider, args)
+            if sharing_provider_requires_cloud_verification(sharing_provider):
+                provider_setup = setup_sharing_provider(project_id, effective_backend, sharing_provider, args)
                 if not provider_setup.get("provider_connection_verified"):
                     shared_location = shared_location_from_args(args)
                     return {
                         "project_id": project_id,
                         "backend": effective_backend,
-                        "sharing_setup_stage": "verify_storage_provider_connection",
-                        "storage_provider": storage_provider,
-                        "storage_provider_setup": provider_setup,
+                        "sharing_setup_stage": "verify_sharing_provider_connection",
+                        "sharing_provider": sharing_provider,
+                        "sharing_provider_setup": provider_setup,
                         "shared_location": shared_location,
                         "permissions": permissions,
-                        "next_required_action": "ask_user_to_approve_provider_connector_then_verify_cloud_sync_and_call_worklog_configure_project_sharing_with_storage_provider_verification",
-                        "text": render_storage_provider_verification_required(
+                        "next_required_action": "ask_user_to_approve_provider_connector_then_verify_cloud_sync_and_call_worklog_configure_project_sharing_with_sharing_provider_verification",
+                        "text": render_sharing_provider_verification_required(
                             project_id,
                             effective_backend,
-                            storage_provider,
+                            sharing_provider,
                             shared_location,
                             provider_setup,
                             permissions,
@@ -375,18 +483,18 @@ class Server:
             permission_plan = backend_permission_plan(
                 project_id,
                 effective_backend,
-                storage_provider,
+                sharing_provider,
                 shared_location_from_args(args),
                 permissions,
                 actor=actor,
             )
-            permission_verification = backend_permission_verification_evidence(args, storage_provider, permission_plan)
+            permission_verification = backend_permission_verification_evidence(args, sharing_provider, permission_plan)
             if permission_plan["required"] and not permission_verification["backend_permissions_verified"]:
                 return {
                     "project_id": project_id,
                     "backend": effective_backend,
                     "sharing_setup_stage": "apply_backend_permissions",
-                    "storage_provider": storage_provider,
+                    "sharing_provider": sharing_provider,
                     "shared_location": shared_location_from_args(args),
                     "permissions": permissions,
                     "backend_permission_plan": permission_plan,
@@ -395,7 +503,7 @@ class Server:
                     "text": render_backend_permission_plan_required(
                         project_id,
                         effective_backend,
-                        storage_provider,
+                        sharing_provider,
                         shared_location_from_args(args),
                         permission_plan,
                         permission_verification,
@@ -408,12 +516,12 @@ class Server:
         permission_plan = backend_permission_plan(
             project_id,
             effective_backend,
-            storage_provider,
+            sharing_provider,
             shared_location_from_args(args),
             permissions,
             actor=actor,
         )
-        permission_verification = backend_permission_verification_evidence(args, storage_provider, permission_plan)
+        permission_verification = backend_permission_verification_evidence(args, sharing_provider, permission_plan)
         settings = dict(existing)
         settings.update(
             {
@@ -432,32 +540,40 @@ class Server:
                 "sharing_confirmation_quote": str(args.get("confirmation_quote")),
             }
         )
+        settings["setup_state"] = project_setup_state(self.db, settings)
         backend = sharing_backend(sharing)
         setup = backend.configure_project(project_id, settings, mode=mode, dry_run=bool(args.get("dry_run", False)))
         if not args.get("dry_run", False):
             self.db.write("project_settings", project_id, settings)
             if mode == "join":
                 setup["pulled"] = backend.pull(self.db, project_id, dry_run=False).get("pulled", [])
-        return {
+        result = {
             "project_sharing": settings,
             "setup": setup,
+            "setup_state": settings["setup_state"],
             "pending_project_updates": pending_session_logs(self.db, project_id),
             "text": render_project_sharing(settings, setup=setup, pending=pending_session_logs(self.db, project_id)),
         }
+        attach_project_setup_next_step(result, settings)
+        return result
 
     def show_project_sharing(self, args: dict[str, Any]) -> dict[str, Any]:
         project_id = clean_required(args, "project_id")
         settings = self.db.project_settings(project_id)
+        settings["setup_state"] = project_setup_state(self.db, settings)
         pending = pending_session_logs(self.db, project_id)
         setup = None
         if sharing_enabled(settings):
             setup = sharing_backend(settings["sharing"]).status(project_id)
-        return {
+        result = {
             "project_sharing": settings,
             "backend_status": setup,
+            "setup_state": settings["setup_state"],
             "pending_project_updates": pending,
             "text": render_project_sharing(settings, setup=setup, pending=pending),
         }
+        attach_project_setup_next_step(result, settings)
+        return result
 
     def update_project_members(self, args: dict[str, Any]) -> dict[str, Any]:
         project_id = clean_required(args, "project_id")
@@ -470,20 +586,20 @@ class Server:
         requested_members = member_role_lists_from_args(args)
         permissions = update_permission_policy(current_permissions, requested_members, operation=operation)
         sharing = existing.get("sharing") if isinstance(existing.get("sharing"), dict) else {}
-        storage_provider = clean_optional(sharing.get("storage_provider"))
+        sharing_provider = clean_optional(sharing.get("sharing_provider"))
         backend_name = clean_optional(sharing.get("backend")) or "local"
         shared_location = shared_location_from_sharing(sharing)
         permission_plan = backend_permission_plan(
             project_id,
             backend_name,
-            storage_provider,
+            sharing_provider,
             shared_location,
             permissions,
             actor=actor,
             current_permissions=current_permissions,
             operation=operation,
         )
-        permission_verification = backend_permission_verification_evidence(args, storage_provider, permission_plan)
+        permission_verification = backend_permission_verification_evidence(args, sharing_provider, permission_plan)
         if sharing_enabled(existing) and permission_plan["required"] and not permission_verification["backend_permissions_verified"]:
             return {
                 "project_id": project_id,
@@ -498,7 +614,7 @@ class Server:
                 "text": render_backend_permission_plan_required(
                     project_id,
                     backend_name,
-                    storage_provider,
+                    sharing_provider,
                     shared_location,
                     permission_plan,
                     permission_verification,
@@ -569,6 +685,7 @@ class Server:
             "last_sync_published": len(result["published"]),
             "last_sync_conflicts": len(result["conflicts"]),
         }
+        settings["setup_state"] = project_setup_state(self.db, settings)
         if not dry_run:
             self.db.write("project_settings", project_id, settings)
         result["pending_project_updates"] = pending_session_logs(self.db, project_id)
@@ -653,18 +770,34 @@ class Server:
             )
         draft = make_session_log_from_events(session, templates["session_log_template"], events)
         self.db.write("session_logs", draft["id"], draft)
+        session_log_text = render_session_log(draft)
+        review_metadata_text = render_session_log_review_metadata(draft)
         return {
             "session_log": draft,
             "source_events": public_source_events(events),
+            "session_log_text": session_log_text,
+            "presentation_guidance": rendered_log_presentation_guidance("session log"),
+            "review_metadata_text": review_metadata_text,
+            "reflection_checklist": session_log_reflection_checklist(),
             "next_required_action": "llm_author_session_log_then_call_worklog_edit_session_log",
-            "text": render_session_log(draft)
-            + "\n\n"
-            + render_session_log_authoring_next_step(),
+            "text": session_log_text,
         }
 
     def show_session_log(self, args: dict[str, Any]) -> dict[str, Any]:
         log = self.db.read("session_logs", required(args, "session_log_id"))
-        return {"session_log": log, "text": render_session_log(log)}
+        session_log_text = render_session_log(log)
+        result = {
+            "session_log": log,
+            "session_log_text": session_log_text,
+            "presentation_guidance": rendered_log_presentation_guidance("session log"),
+            "review_metadata_text": render_session_log_review_metadata(log),
+            "text": session_log_text,
+        }
+        if log["status"] == "draft":
+            result["next_required_action"] = (
+                "present_rendered_session_log_in_chat_not_code_block_then_ask_for_review_or_explicit_approval"
+            )
+        return result
 
     def edit_session_log(self, args: dict[str, Any]) -> dict[str, Any]:
         log = self.db.read("session_logs", required(args, "session_log_id"))
@@ -683,13 +816,26 @@ class Server:
         apply_session_patch(log, patch)
         log["updated_at"] = now()
         self.db.write("session_logs", log["id"], log)
-        return {"session_log": log, "text": render_session_log(log)}
+        session_log_text = render_session_log(log)
+        return {
+            "session_log": log,
+            "session_log_text": session_log_text,
+            "presentation_guidance": rendered_log_presentation_guidance("session log"),
+            "review_metadata_text": render_session_log_review_metadata(log),
+            "reflection_checklist": session_log_reflection_checklist(),
+            "next_required_action": (
+                "present_rendered_session_log_in_chat_not_code_block_then_ask_for_review_or_explicit_approval"
+            ),
+            "text": session_log_text,
+        }
 
     def approve_session_log(self, args: dict[str, Any]) -> dict[str, Any]:
         require_confirmation(args, "approve session log")
         log = self.db.read("session_logs", required(args, "session_log_id"))
         if not log.get("project_id"):
             raise UserError("Add project_id before approving this session log.")
+        if not session_log_has_content(log):
+            raise UserError("The session log needs authored section content before approval.")
         author = clean_optional(args.get("author")) or clean_optional(args.get("approved_by"))
         if author:
             log["author"] = author
@@ -706,6 +852,8 @@ class Server:
             "session_log": log,
             "publish": publish,
             "pending_project_updates": pending,
+            "session_log_text": render_session_log(log),
+            "review_metadata_text": render_after_session_approval(log, publish, pending),
             "next": "worklog_draft_project_log",
             "text": render_session_log(log)
             + "\n\n"
@@ -738,6 +886,7 @@ class Server:
                 "session_logs": session_logs,
                 "project_log_template": templates["project_log_template"],
                 "draft_seed": draft,
+                "reflection_checklist": project_rollup_reflection_checklist(),
                 "next_required_action": "llm_author_project_log_draft_then_call_worklog_draft_project_log_with_sections",
                 "text": render_project_rollup_authoring(
                     project_id,
@@ -754,7 +903,13 @@ class Server:
             draft["session_log_ids"] = dedupe([*draft["session_log_ids"], *source_ids])
         draft["updated_at"] = now()
         self.db.write("project_logs", draft["id"], draft)
-        return {"project_log": draft, "text": render_project_log(draft)}
+        return {
+            "project_log": draft,
+            "project_log_text": render_project_log(draft),
+            "presentation_guidance": rendered_log_presentation_guidance("project log"),
+            "reflection_checklist": project_log_reflection_checklist(),
+            "text": render_project_log(draft),
+        }
 
     def show_project_log(self, args: dict[str, Any]) -> dict[str, Any]:
         project_log_id = clean_optional(args.get("project_log_id"))
@@ -766,15 +921,20 @@ class Server:
             log = self.db.latest_project_log(project_id, status=None if status == "any" else status)
             if log is None:
                 raise UserError(f"No {status} project log found for `{project_id}`.")
-        pending = pending_session_logs(self.db, log["project_id"])
+        pending = pending_session_logs_for_log(self.db, log)
+        project_log_text = render_project_log(log)
+        review_metadata_text = render_project_log_review_metadata(log, pending)
         return {
             "project_log": log,
             "pending_project_updates": pending,
-            "text": render_project_log(log) + "\n\n" + render_pending_project_updates(pending),
+            "project_log_text": project_log_text,
+            "presentation_guidance": rendered_log_presentation_guidance("project log"),
+            "review_metadata_text": review_metadata_text,
+            "reflection_checklist": project_log_reflection_checklist(),
+            "text": project_log_text,
         }
 
     def edit_project_log(self, args: dict[str, Any]) -> dict[str, Any]:
-        require_confirmation(args, "edit project log")
         log = self.db.read("project_logs", required(args, "project_log_id"))
         if log["status"] == "approved":
             raise UserError("Approved project logs are final. Draft a new one for further changes.")
@@ -784,7 +944,13 @@ class Server:
         apply_project_patch(log, patch)
         log["updated_at"] = now()
         self.db.write("project_logs", log["id"], log)
-        return {"project_log": log, "text": render_project_log(log)}
+        return {
+            "project_log": log,
+            "project_log_text": render_project_log(log),
+            "presentation_guidance": rendered_log_presentation_guidance("project log"),
+            "reflection_checklist": project_log_reflection_checklist(),
+            "text": render_project_log(log),
+        }
 
     def approve_project_log(self, args: dict[str, Any]) -> dict[str, Any]:
         require_confirmation(args, "approve project log")
@@ -798,6 +964,8 @@ class Server:
                 "A newer approved project log exists. Sync, review the pending session logs, "
                 "and draft a new project log from the latest approved base."
             )
+        if previous is None and not project_log_has_content(log):
+            raise UserError("The initial project log needs authored project context before approval.")
         approved_at = now()
         if previous and previous["id"] != log["id"]:
             previous["status"] = "superseded"
@@ -810,6 +978,7 @@ class Server:
         log["confirmation_quote"] = str(args.get("confirmation_quote"))
         log["updated_at"] = approved_at
         self.db.write("project_logs", log["id"], log)
+        mark_project_setup_complete(self.db, log)
         publish = publish_after_approval(self.db, log["project_id"])
         pending = pending_session_logs(self.db, log["project_id"])
         return {
@@ -1028,7 +1197,7 @@ class FileSharingBackend(SharingBackend):
             "shared_project_dir": str(project_dir),
             "created": [],
             "verified": [],
-            **storage_provider_verification(self.config),
+            **sharing_provider_verification(self.config),
         }
         if mode == "join" and not project_dir.exists():
             raise UserError(f"Cannot join shared project; `{project_dir}` does not exist.")
@@ -1049,7 +1218,7 @@ class FileSharingBackend(SharingBackend):
             "exists": project_dir.exists(),
             "readable": os.access(project_dir, os.R_OK) if project_dir.exists() else False,
             "writable": os.access(project_dir, os.W_OK) if project_dir.exists() else False,
-            **storage_provider_verification(self.config),
+            **sharing_provider_verification(self.config),
         }
         return status
 
@@ -1179,6 +1348,14 @@ class ConnectorPayloadBackend(SharingBackend):
             "dry_run": dry_run,
         }
 
+    def status(self, project_id: str) -> dict[str, Any]:
+        return {
+            "backend": self.name,
+            "project_id": project_id,
+            "connector_target": clean_optional(self.config.get("connector_target")) or clean_optional(self.config.get("connector")),
+            **sharing_provider_verification(self.config),
+        }
+
     def push(self, db: Store, project_id: str, *, dry_run: bool) -> dict[str, Any]:
         settings = db.project_settings(project_id)
         artifacts = [
@@ -1215,8 +1392,8 @@ def normalize_sharing_config(
     backend: str,
     mode: str,
 ) -> dict[str, Any]:
-    storage_provider = sharing_storage_provider_key(args.get("storage_provider"))
-    backend = backend_for_storage_provider(storage_provider, backend)
+    sharing_provider = sharing_provider_key(args.get("sharing_provider"))
+    backend = backend_for_sharing_provider(sharing_provider, backend)
     config: dict[str, Any] = {}
     for source_key, target_key in (
         ("root", "root"),
@@ -1230,11 +1407,11 @@ def normalize_sharing_config(
         {
             "enabled": True,
             "backend": backend,
-            "storage_provider": storage_provider,
-            "storage_provider_setup": setup_storage_provider(
+            "sharing_provider": sharing_provider,
+            "sharing_provider_setup": setup_sharing_provider(
                 project_id,
                 backend,
-                storage_provider,
+                sharing_provider,
                 args,
             ),
             "mode": mode,
@@ -1245,8 +1422,8 @@ def normalize_sharing_config(
         }
     )
     if backend in {"shared_directory", "git_repo"}:
-        if not clean_optional(config.get("storage_provider")):
-            raise UserError(f"Sharing backend `{backend}` requires explicit `storage_provider`.")
+        if not clean_optional(config.get("sharing_provider")):
+            raise UserError(f"Sharing backend `{backend}` requires explicit `sharing_provider`.")
         if not clean_optional(config.get("root")) and not clean_optional(config.get("shared_project_dir")):
             raise UserError(f"Sharing backend `{backend}` requires `root` or `shared_project_dir`.")
     return config
@@ -1256,16 +1433,37 @@ def backend_requires_location(backend: str) -> bool:
     return backend in {"shared_directory", "git_repo"}
 
 
-def backend_for_storage_provider(storage_provider: str | None, requested_backend: str) -> str:
-    if storage_provider in GIT_STORAGE_PROVIDERS:
-        return "git_repo"
-    if storage_provider in MOUNTED_STORAGE_PROVIDERS:
-        return "shared_directory"
-    return requested_backend
+def rendered_log_presentation_guidance(log_type: str) -> str:
+    return RENDERED_LOG_PRESENTATION_GUIDANCE.format(log_type=log_type)
 
 
-def storage_provider_requires_cloud_verification(storage_provider: str | None) -> bool:
-    return storage_provider in CLOUD_SYNC_STORAGE_PROVIDERS
+def backend_for_sharing_provider(sharing_provider: str | None, requested_backend: str) -> str:
+    return sharing_provider_backend(sharing_provider) or requested_backend
+
+
+def sharing_provider_requires_cloud_verification(sharing_provider: str | None) -> bool:
+    return bool(sharing_provider_meta(sharing_provider).get("requires_cloud_verification"))
+
+
+def sharing_provider_backend(sharing_provider: str | None) -> str | None:
+    backend = sharing_provider_meta(sharing_provider).get("backend")
+    return backend if isinstance(backend, str) else None
+
+
+def sharing_provider_kind(sharing_provider: str | None) -> str | None:
+    kind = sharing_provider_meta(sharing_provider).get("kind")
+    return kind if isinstance(kind, str) else None
+
+
+def sharing_provider_meta(sharing_provider: str | None) -> dict[str, Any]:
+    if not sharing_provider:
+        return {}
+    meta = SHARING_PROVIDERS.get(sharing_provider)
+    return meta if isinstance(meta, dict) else {}
+
+
+def sharing_provider_uses_backend(sharing_provider: str | None, backend: str) -> bool:
+    return sharing_provider_backend(sharing_provider) == backend
 
 
 def has_shared_location(args: dict[str, Any]) -> bool:
@@ -1273,6 +1471,14 @@ def has_shared_location(args: dict[str, Any]) -> bool:
         if clean_optional(args.get(key)):
             return True
     return False
+
+
+def has_connector_target(args: dict[str, Any]) -> bool:
+    return bool(connector_target_from_args(args))
+
+
+def connector_target_from_args(args: dict[str, Any]) -> str | None:
+    return clean_optional(args.get("connector_target")) or clean_optional(args.get("connector"))
 
 
 def shared_location_from_args(args: dict[str, Any]) -> dict[str, str]:
@@ -1284,11 +1490,11 @@ def shared_location_from_args(args: dict[str, Any]) -> dict[str, str]:
     return result
 
 
-def sharing_storage_provider_key(value: Any) -> str | None:
-    storage_provider = clean_optional(value)
-    if not storage_provider:
+def sharing_provider_key(value: Any) -> str | None:
+    sharing_provider = clean_optional(value)
+    if not sharing_provider:
         return None
-    key = section_key(storage_provider)
+    key = section_key(sharing_provider)
     aliases = {
         "gdrive": "google_drive",
         "google": "google_drive",
@@ -1311,6 +1517,10 @@ def sharing_storage_provider_key(value: Any) -> str | None:
         "bitbucket": "bitbucket",
         "bit_bucket": "bitbucket",
         "bitbucket_repo": "bitbucket",
+        "linear": "linear",
+        "linear_app": "linear",
+        "linear_project": "linear",
+        "linear_workspace": "linear",
         "docker": "docker_mount",
         "docker_volume": "docker_mount",
         "docker_mount": "docker_mount",
@@ -1318,40 +1528,40 @@ def sharing_storage_provider_key(value: Any) -> str | None:
     return aliases.get(key, key)
 
 
-def storage_provider_verification(config: dict[str, Any]) -> dict[str, Any]:
-    provider = clean_optional(config.get("storage_provider"))
-    setup = config.get("storage_provider_setup") if isinstance(config.get("storage_provider_setup"), dict) else {}
-    if provider in MOUNTED_STORAGE_PROVIDERS:
+def sharing_provider_verification(config: dict[str, Any]) -> dict[str, Any]:
+    provider = clean_optional(config.get("sharing_provider"))
+    setup = config.get("sharing_provider_setup") if isinstance(config.get("sharing_provider_setup"), dict) else {}
+    if sharing_provider_uses_backend(provider, "shared_directory"):
         verification_scope = setup.get("verification_scope") or "local_filesystem_mount"
         provider_connection_verified = bool(setup.get("provider_connection_verified", False))
-        if storage_provider_requires_cloud_verification(provider) and verification_scope in {
+        if sharing_provider_requires_cloud_verification(provider) and verification_scope in {
             "local_filesystem_mount",
             "local_filesystem_mount_only",
         }:
             provider_connection_verified = False
         return {
-            "storage_provider": provider,
-            "storage_provider_setup_status": setup.get("setup_status") or (
-                "needs_cloud_verification" if storage_provider_requires_cloud_verification(provider) else "unknown"
+            "sharing_provider": provider,
+            "sharing_provider_setup_status": setup.get("setup_status") or (
+                "needs_cloud_verification" if sharing_provider_requires_cloud_verification(provider) else "unknown"
             ),
             "verification_scope": verification_scope,
             "provider_connection_verified": provider_connection_verified,
-            "cloud_sync_verification_required": storage_provider_requires_cloud_verification(provider),
+            "cloud_sync_verification_required": sharing_provider_requires_cloud_verification(provider),
             "provider_connection_note": (
                 setup.get("provider_connection_note")
                 or (
                     "Worklog verified only local filesystem access to the mounted folder. It has not "
                     "verified provider authentication or cloud sync."
-                    if storage_provider_requires_cloud_verification(provider)
+                    if sharing_provider_requires_cloud_verification(provider)
                     else "Worklog configured the shared_directory backend and verified local filesystem "
                     "access to the mounted folder."
                 )
             ),
         }
-    if provider in GIT_STORAGE_PROVIDERS:
+    if sharing_provider_uses_backend(provider, "git_repo"):
         return {
-            "storage_provider": provider,
-            "storage_provider_setup_status": setup.get("setup_status") or "unknown",
+            "sharing_provider": provider,
+            "sharing_provider_setup_status": setup.get("setup_status") or "unknown",
             "verification_scope": setup.get("verification_scope") or "local_git_worktree",
             "provider_connection_verified": bool(setup.get("provider_connection_verified", False)),
             "provider_connection_note": (
@@ -1360,53 +1570,95 @@ def storage_provider_verification(config: dict[str, Any]) -> dict[str, Any]:
                 "the Git provider or verify remote push/pull access."
             ),
         }
+    if sharing_provider_uses_backend(provider, "connector_payload"):
+        return {
+            "sharing_provider": provider,
+            "sharing_provider_setup_status": setup.get("setup_status") or "needs_connector_verification",
+            "verification_scope": setup.get("verification_scope") or f"{provider}_connector",
+            "provider_connection_verified": bool(setup.get("provider_connection_verified", False)),
+            "cloud_sync_verification_required": False,
+            "provider_connection_note": (
+                setup.get("provider_connection_note")
+                or "Worklog needs connector/API/browser verification before claiming connector-backed publishing is ready."
+            ),
+        }
     return {
-        "storage_provider": provider,
+        "sharing_provider": provider,
         "verification_scope": "worklog_backend",
         "provider_connection_verified": False,
         "provider_connection_note": "Worklog verified only its own backend setup.",
     }
 
 
-def setup_storage_provider(
+def setup_sharing_provider(
     project_id: str,
     backend: str,
-    storage_provider: str | None,
+    sharing_provider: str | None,
     args: dict[str, Any],
 ) -> dict[str, Any]:
-    if not storage_provider:
+    if not sharing_provider:
         return {
-            "setup_status": "missing_storage_provider",
+            "setup_status": "missing_sharing_provider",
             "provider_connection_verified": False,
             "suggested_roots": [],
         }
-    if storage_provider in MOUNTED_STORAGE_PROVIDERS:
-        return setup_mounted_storage_provider(project_id, backend, storage_provider, args)
-    if storage_provider in GIT_STORAGE_PROVIDERS:
-        return setup_git_storage_provider(project_id, backend, storage_provider, args)
+    if sharing_provider_uses_backend(sharing_provider, "shared_directory"):
+        return setup_mounted_sharing_provider(project_id, backend, sharing_provider, args)
+    if sharing_provider_uses_backend(sharing_provider, "git_repo"):
+        return setup_git_sharing_provider(project_id, backend, sharing_provider, args)
+    if sharing_provider_uses_backend(sharing_provider, "connector_payload"):
+        return setup_connector_sharing_provider(project_id, backend, sharing_provider, args)
     return {
-        "storage_provider": storage_provider,
+        "sharing_provider": sharing_provider,
         "provider_backend": "custom",
         "setup_status": "needs_external_setup",
         "verification_scope": "custom_provider",
         "provider_connection_verified": False,
-        "provider_connection_note": "Worklog does not know how to configure this storage provider automatically.",
+        "provider_connection_note": "Worklog does not know how to configure this sharing provider automatically.",
         "suggested_roots": ["<shared-root>/Worklog"],
     }
 
 
-def setup_mounted_storage_provider(
+def setup_connector_sharing_provider(
     project_id: str,
     backend: str,
-    storage_provider: str,
+    sharing_provider: str,
     args: dict[str, Any],
 ) -> dict[str, Any]:
-    roots = mounted_provider_roots(storage_provider)
-    suggested_roots = mounted_provider_suggested_roots(storage_provider, roots)
+    verification = sharing_provider_connection_evidence(args, sharing_provider)
+    provider_name = sharing_provider_display_name(sharing_provider)
+    target = clean_optional(args.get("connector_target")) or clean_optional(args.get("connector"))
+    verified = bool(verification.get("provider_connection_verified"))
+    return {
+        "sharing_provider": sharing_provider,
+        "provider_backend": "connector_payload",
+        "setup_status": "ready" if verified else "needs_connector_verification",
+        "backend": "connector_payload",
+        "verification_scope": clean_optional(verification.get("verification_scope")) or f"{sharing_provider}_connector",
+        "provider_connection_verified": verified,
+        "provider_connection_note": (
+            verification.get("provider_connection_note")
+            or f"Use {provider_name} connector, API, or browser tooling to publish approved Worklog payloads and verify access."
+        ),
+        "connector_target": target,
+        "suggested_targets": connector_provider_suggested_targets(project_id, sharing_provider),
+        "sharing_provider_verification": verification,
+        "connector_hint": connector_provider_hint(sharing_provider),
+    }
+
+
+def setup_mounted_sharing_provider(
+    project_id: str,
+    backend: str,
+    sharing_provider: str,
+    args: dict[str, Any],
+) -> dict[str, Any]:
+    roots = mounted_provider_roots(sharing_provider)
+    suggested_roots = mounted_provider_suggested_roots(sharing_provider, roots)
     writable_roots = [path for path in suggested_roots if local_path_ready(path)]
     local_mount_ready = bool(roots)
-    cloud_sync_required = storage_provider_requires_cloud_verification(storage_provider)
-    connection_evidence = storage_provider_connection_evidence(args, storage_provider)
+    cloud_sync_required = sharing_provider_requires_cloud_verification(sharing_provider)
+    connection_evidence = sharing_provider_connection_evidence(args, sharing_provider)
     provider_connection_verified = bool(connection_evidence.get("provider_connection_verified"))
     provider_names = {
         "google_drive": "Google Drive",
@@ -1416,19 +1668,19 @@ def setup_mounted_storage_provider(
         "local_folder": "Local folder",
         "docker_mount": "Docker mount",
     }
-    provider_name = provider_names.get(storage_provider, titleize(storage_provider))
+    provider_name = provider_names.get(sharing_provider, titleize(sharing_provider))
     if cloud_sync_required and provider_connection_verified:
         note = (
             connection_evidence.get("provider_connection_note")
             or f"Worklog received {provider_name} connector verification evidence from the agent."
         )
         status = "ready"
-        verification_scope = clean_optional(connection_evidence.get("verification_scope")) or f"{storage_provider}_connector"
+        verification_scope = clean_optional(connection_evidence.get("verification_scope")) or f"{sharing_provider}_connector"
     elif cloud_sync_required and local_mount_ready:
         note = (
             f"Worklog found a local {provider_name} sync/mount location, but that only verifies the "
             "local filesystem surface. The agent must ask the user to approve the provider connector, "
-            "verify the cloud-side Worklog location, and call this tool again with `storage_provider_verification`."
+            "verify the cloud-side Worklog location, and call this tool again with `sharing_provider_verification`."
         )
         status = "needs_cloud_verification"
         verification_scope = "local_filesystem_mount_only"
@@ -1448,7 +1700,7 @@ def setup_mounted_storage_provider(
         status = "needs_provider_connection"
         verification_scope = "local_filesystem_mount"
     return {
-        "storage_provider": storage_provider,
+        "sharing_provider": sharing_provider,
         "provider_backend": "mounted_folder",
         "setup_status": status,
         "backend": backend,
@@ -1457,7 +1709,7 @@ def setup_mounted_storage_provider(
         "local_mount_ready": local_mount_ready,
         "cloud_sync_verification_required": cloud_sync_required,
         "provider_connection_note": note,
-        "storage_provider_verification": connection_evidence,
+        "sharing_provider_verification": connection_evidence,
         "mount_roots": [str(path) for path in roots],
         "suggested_roots": suggested_roots,
         "writable_suggested_roots": writable_roots,
@@ -1465,22 +1717,22 @@ def setup_mounted_storage_provider(
             resulting_project_dir_example(project_id, root)
             for root in suggested_roots[:3]
         ],
-        "connector_hint": mounted_provider_connector_hint(storage_provider),
+        "connector_hint": mounted_provider_connector_hint(sharing_provider),
     }
 
 
-def storage_provider_connection_evidence(args: dict[str, Any], storage_provider: str) -> dict[str, Any]:
-    raw = args.get("storage_provider_verification")
+def sharing_provider_connection_evidence(args: dict[str, Any], sharing_provider: str) -> dict[str, Any]:
+    raw = args.get("sharing_provider_verification")
     if raw is None:
         raw = args.get("provider_verification")
     if not isinstance(raw, dict):
         return {}
-    evidence_provider = sharing_storage_provider_key(raw.get("storage_provider"))
-    if evidence_provider and evidence_provider != storage_provider:
+    evidence_provider = sharing_provider_key(raw.get("sharing_provider"))
+    if evidence_provider and evidence_provider != sharing_provider:
         return {
             "provider_connection_verified": False,
             "provider_connection_note": (
-                f"Ignored verification for `{evidence_provider}` because the selected provider is `{storage_provider}`."
+                f"Ignored verification for `{evidence_provider}` because the selected provider is `{sharing_provider}`."
             ),
         }
     verified = bool(
@@ -1490,28 +1742,28 @@ def storage_provider_connection_evidence(args: dict[str, Any], storage_provider:
         or raw.get("verified")
     )
     result = dict(raw)
-    result["storage_provider"] = storage_provider
+    result["sharing_provider"] = sharing_provider
     result["provider_connection_verified"] = verified
     if not clean_optional(result.get("verification_scope")):
-        result["verification_scope"] = f"{storage_provider}_connector"
+        result["verification_scope"] = f"{sharing_provider}_connector"
     if not clean_optional(result.get("verified_at")) and verified:
         result["verified_at"] = now()
     return result
 
 
-def setup_git_storage_provider(
+def setup_git_sharing_provider(
     project_id: str,
     backend: str,
-    storage_provider: str,
+    sharing_provider: str,
     args: dict[str, Any],
 ) -> dict[str, Any]:
     candidate_root = git_root_candidate(args)
     repo_ready = (candidate_root / ".git").exists()
     explicit_location = bool(clean_optional(args.get("root")) or clean_optional(args.get("shared_project_dir")))
     suggested_roots = [str(candidate_root)] if repo_ready or explicit_location else ["<repo-root>"]
-    provider_name = git_provider_display_name(storage_provider)
+    provider_name = git_provider_display_name(sharing_provider)
     return {
-        "storage_provider": storage_provider,
+        "sharing_provider": sharing_provider,
         "provider_backend": "local_git_worktree",
         "setup_status": "ready" if repo_ready else "needs_git_worktree",
         "backend": "git_repo",
@@ -1549,67 +1801,71 @@ def nearest_git_root(start: Path) -> Path | None:
     return None
 
 
-def git_provider_display_name(storage_provider: str) -> str:
-    names = {
-        "github": "GitHub",
-        "gitlab": "GitLab",
-        "bitbucket": "Bitbucket",
+def git_provider_display_name(sharing_provider: str) -> str:
+    display_name = sharing_provider_meta(sharing_provider).get("display_name")
+    return display_name if isinstance(display_name, str) else "Git"
+
+
+def sharing_provider_display_name(sharing_provider: str) -> str:
+    if sharing_provider == "selected_provider":
+        return "the selected provider"
+    display_name = sharing_provider_meta(sharing_provider).get("display_name")
+    return display_name if isinstance(display_name, str) else titleize(sharing_provider)
+
+
+def connector_provider_suggested_targets(project_id: str, sharing_provider: str) -> list[str]:
+    if sharing_provider == "linear":
+        return [
+            f"Linear workspace/team/project for {project_id}",
+            "Linear project or issue collection chosen by the user",
+        ]
+    return [f"{sharing_provider_display_name(sharing_provider)} target for {project_id}"]
+
+
+def connector_provider_hint(sharing_provider: str) -> str:
+    hints = {
+        "linear": "Use Linear connector, API, or browser tooling to create or update a project/wiki/issue target for approved Worklog artifacts.",
     }
-    return names.get(storage_provider, "Git")
+    return hints.get(sharing_provider, f"Use {sharing_provider_display_name(sharing_provider)} tooling to publish approved Worklog artifacts.")
 
 
-def storage_provider_display_name(storage_provider: str) -> str:
-    names = {
-        "google_drive": "Google Drive",
-        "dropbox": "Dropbox",
-        "onedrive": "OneDrive/SharePoint",
-        "network_folder": "Network Folder",
-        "local_folder": "Local Folder",
-        "docker_mount": "Docker Mount",
-        "selected_provider": "the selected provider",
-    }
-    if storage_provider in GIT_STORAGE_PROVIDERS:
-        return git_provider_display_name(storage_provider)
-    return names.get(storage_provider, titleize(storage_provider))
-
-
-def mounted_provider_roots(storage_provider: str) -> list[Path]:
+def mounted_provider_roots(sharing_provider: str) -> list[Path]:
     home = Path.home()
-    if storage_provider == "google_drive":
+    if sharing_provider == "google_drive":
         return existing_cloud_storage_roots("GoogleDrive-*") + existing_paths(home / "Google Drive", home / "google_drive")
-    if storage_provider == "dropbox":
+    if sharing_provider == "dropbox":
         return existing_paths(home / "Dropbox", home / "dropbox")
-    if storage_provider == "onedrive":
+    if sharing_provider == "onedrive":
         return existing_cloud_storage_roots("OneDrive-*") + existing_paths(home / "OneDrive", home / "onedrive")
-    if storage_provider == "network_folder":
+    if sharing_provider == "network_folder":
         volumes = Path("/Volumes")
         return [path for path in sorted(volumes.iterdir()) if path.is_dir()] if volumes.exists() else []
-    if storage_provider == "local_folder":
+    if sharing_provider == "local_folder":
         return [home]
-    if storage_provider == "docker_mount":
+    if sharing_provider == "docker_mount":
         return existing_paths(Path("/workspace"), Path("/workspaces"), Path("/worklog-shared"))
     return []
 
 
-def mounted_provider_suggested_roots(storage_provider: str, roots: list[Path]) -> list[str]:
-    if storage_provider == "google_drive":
+def mounted_provider_suggested_roots(sharing_provider: str, roots: list[Path]) -> list[str]:
+    if sharing_provider == "google_drive":
         suggestions = [str(root / "My Drive" / "Worklog") if root.name.startswith("GoogleDrive-") else str(root / "Worklog") for root in roots]
         suggestions.extend(["~/Library/CloudStorage/GoogleDrive-<account>/My Drive/Worklog", "~/Google Drive/Worklog"])
         return dedupe(suggestions)
-    if storage_provider == "dropbox":
+    if sharing_provider == "dropbox":
         return dedupe([str(root / "Worklog") for root in roots] + ["~/Dropbox/Worklog"])
-    if storage_provider == "onedrive":
+    if sharing_provider == "onedrive":
         return dedupe([str(root / "Worklog") for root in roots] + ["~/Library/CloudStorage/OneDrive-<organization>/Worklog", "~/OneDrive/Worklog"])
-    if storage_provider == "network_folder":
+    if sharing_provider == "network_folder":
         return dedupe([str(root / "Worklog") for root in roots] + ["/Volumes/<team-share>/Worklog"])
-    if storage_provider == "local_folder":
+    if sharing_provider == "local_folder":
         return dedupe([str(Path.home() / "Worklog" / "Shared")])
-    if storage_provider == "docker_mount":
+    if sharing_provider == "docker_mount":
         return dedupe([str(root / "shared-worklog") for root in roots] + ["/workspace/shared-worklog", "/worklog-shared"])
     return []
 
 
-def mounted_provider_connector_hint(storage_provider: str) -> str:
+def mounted_provider_connector_hint(sharing_provider: str) -> str:
     hints = {
         "google_drive": "Use the Google Drive connector or Google Drive for desktop to establish the sync surface.",
         "dropbox": "Use Dropbox desktop sync or a Dropbox connector to establish the sync surface.",
@@ -1618,7 +1874,7 @@ def mounted_provider_connector_hint(storage_provider: str) -> str:
         "local_folder": "Local folder setup is available, but Worklog cannot verify external sync.",
         "docker_mount": "Mount the host/shared volume into the Worklog runtime before selecting a Worklog root.",
     }
-    return hints.get(storage_provider, "Set up the provider before selecting a Worklog root.")
+    return hints.get(sharing_provider, "Set up the provider before selecting a Worklog root.")
 
 
 def existing_cloud_storage_roots(pattern: str) -> list[Path]:
@@ -1637,63 +1893,58 @@ def local_path_ready(path: str) -> bool:
     return expanded.exists() and os.access(expanded, os.R_OK) and os.access(expanded, os.W_OK)
 
 
-def shared_storage_provider_guidance(project_id: str, backend: str) -> dict[str, Any]:
+def sharing_provider_selection_guidance(project_id: str, backend: str) -> dict[str, Any]:
     return {
         "backend": backend,
-        "storage_provider_options": [
-            storage_provider_summary(backend, item)
-            for item in storage_providers_for_backend(backend)
+        "sharing_provider_options": [
+            sharing_provider_summary(backend, item)
+            for item in sharing_providers_for_backend(backend)
         ],
         "notes": [
-            "Choose the storage provider before choosing the shared root path.",
-            "Mounted-folder providers use `shared_directory`; GitHub, GitLab, and Bitbucket use `git_repo`.",
-            "Do not infer the storage provider from an example path or mounted folder name.",
-            "After the user chooses a provider, call Worklog again with `storage_provider` to get path suggestions for that provider.",
+            "Choose the sharing provider before choosing the shared root path, repository, or connector target.",
+            "Mounted-folder providers use `shared_directory`; GitHub, GitLab, and Bitbucket use `git_repo`; connector-backed systems such as Linear use `connector_payload`.",
+            "Do not infer the sharing provider from an example path or mounted folder name.",
+            "After the user chooses a provider, call Worklog again with `sharing_provider` to get location or target suggestions for that provider.",
         ],
     }
 
 
-def storage_providers_for_backend(backend: str) -> list[str]:
-    if backend == "git_repo":
-        return list(GIT_STORAGE_PROVIDERS)
+def sharing_providers_for_backend(backend: str) -> list[str]:
     if backend == "shared_directory":
-        return [*MOUNTED_STORAGE_PROVIDERS, *GIT_STORAGE_PROVIDERS]
+        return list(SHARING_PROVIDERS)
+    if backend in SHARING_BACKENDS:
+        return [
+            provider
+            for provider, meta in SHARING_PROVIDERS.items()
+            if meta.get("backend") == backend
+        ]
     return []
 
 
-def storage_provider_summary(backend: str, storage_provider: str) -> dict[str, Any]:
-    descriptions = {
-        "google_drive": "Mounted Google Drive folder via Google Drive for desktop.",
-        "dropbox": "Mounted Dropbox folder.",
-        "onedrive": "Mounted OneDrive or SharePoint-synced folder.",
-        "network_folder": "Mounted team or network share.",
-        "local_folder": "Local folder that another sync app or OS sharing layer manages.",
-        "docker_mount": "Docker bind mount or volume visible to the process running Worklog.",
-        "github": "Local checkout of a GitHub repository.",
-        "gitlab": "Local checkout of a GitLab repository.",
-        "bitbucket": "Local checkout of a Bitbucket repository.",
-    }
+def sharing_provider_summary(backend: str, sharing_provider: str) -> dict[str, Any]:
+    description = sharing_provider_meta(sharing_provider).get("description")
     return {
-        "storage_provider": storage_provider,
-        "backend": backend_for_storage_provider(storage_provider, backend),
-        "description": descriptions.get(storage_provider, "Custom shared location provider."),
+        "sharing_provider": sharing_provider,
+        "sharing_provider_kind": sharing_provider_kind(sharing_provider) or "custom",
+        "backend": backend_for_sharing_provider(sharing_provider, backend),
+        "description": description if isinstance(description, str) else "Custom shared location provider.",
     }
 
 
 def shared_location_guidance(
     project_id: str,
     backend: str,
-    storage_provider: str | None,
+    sharing_provider: str | None,
     *,
     provider_setup: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    storage_provider_options = []
-    selected = storage_provider
-    storage_providers = [selected] if selected else storage_providers_for_backend(backend)
-    for item in storage_providers:
+    sharing_provider_options = []
+    selected = sharing_provider
+    sharing_providers = [selected] if selected else sharing_providers_for_backend(backend)
+    for item in sharing_providers:
         if item:
-            storage_provider_options.append(
-                storage_provider_guidance(
+            sharing_provider_options.append(
+                sharing_provider_guidance(
                     project_id,
                     backend,
                     item,
@@ -1702,9 +1953,9 @@ def shared_location_guidance(
             )
     return {
         "backend": backend,
-        "selected_storage_provider": selected,
-        "storage_provider_setup": provider_setup or {},
-        "storage_provider_options": storage_provider_options,
+        "selected_sharing_provider": selected,
+        "sharing_provider_setup": provider_setup or {},
+        "sharing_provider_options": sharing_provider_options,
         "path_argument": "root",
         "notes": [
             "Pass the shared root path as `root`.",
@@ -1714,43 +1965,68 @@ def shared_location_guidance(
     }
 
 
-def storage_provider_guidance(
+def connector_target_guidance(
+    project_id: str,
+    sharing_provider: str | None,
+    provider_setup: dict[str, Any],
+    selected_target: str | None,
+) -> dict[str, Any]:
+    suggestions = provider_setup.get("suggested_targets") if isinstance(provider_setup, dict) else []
+    return {
+        "backend": "connector_payload",
+        "selected_sharing_provider": sharing_provider,
+        "selected_connector_target": selected_target,
+        "sharing_provider_setup": provider_setup,
+        "connector_target_options": suggestions or connector_provider_suggested_targets(
+            project_id,
+            sharing_provider or "selected_provider",
+        ),
+        "target_argument": "connector_target",
+        "notes": [
+            "Connector-backed sharing publishes approved Worklog artifacts as payloads for the agent to apply through the selected provider.",
+            "Draft session logs and draft project logs remain local.",
+            "After the user confirms the connector target, call Worklog again with `sharing_provider`, `connector_target`, `confirmed_by_user: true`, and their confirmation quote.",
+        ],
+    }
+
+
+def sharing_provider_guidance(
     project_id: str,
     backend: str,
-    storage_provider: str,
+    sharing_provider: str,
     *,
     provider_setup: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     home = Path.home()
     paths: list[str] = []
     description = ""
-    if storage_provider == "google_drive":
+    if sharing_provider == "google_drive":
         description = "Mounted Google Drive folder via Google Drive for desktop."
         paths.extend(existing_cloud_roots("GoogleDrive-*", "My Drive/Worklog"))
         paths.append("~/Library/CloudStorage/GoogleDrive-<account>/My Drive/Worklog")
         paths.append("~/Google Drive/Worklog")
-    elif storage_provider == "dropbox":
+    elif sharing_provider == "dropbox":
         description = "Mounted Dropbox folder."
         if (home / "Dropbox").exists():
             paths.append("~/Dropbox/Worklog")
         paths.append("~/Dropbox/Worklog")
-    elif storage_provider == "onedrive":
+    elif sharing_provider == "onedrive":
         description = "Mounted OneDrive or SharePoint-synced folder."
         paths.extend(existing_cloud_roots("OneDrive-*", "Worklog"))
         paths.append("~/Library/CloudStorage/OneDrive-<organization>/Worklog")
         paths.append("~/OneDrive/Worklog")
-    elif storage_provider == "network_folder":
+    elif sharing_provider == "network_folder":
         description = "Mounted team or network share."
         paths.append("/Volumes/<team-share>/Worklog")
-    elif storage_provider == "local_folder":
+    elif sharing_provider == "local_folder":
         description = "Local folder that another sync app or OS sharing layer manages."
         paths.append("~/Worklog/Shared")
-    elif storage_provider == "docker_mount":
+    elif sharing_provider == "docker_mount":
         description = "Docker bind mount or volume visible to the process running Worklog."
         paths.append("/workspace/shared-worklog")
         paths.append("/worklog-shared")
-    elif storage_provider in GIT_STORAGE_PROVIDERS:
-        provider_name = git_provider_display_name(storage_provider)
+    elif sharing_provider_uses_backend(sharing_provider, "git_repo"):
+        provider_name = git_provider_display_name(sharing_provider)
         description = f"Local {provider_name} repository root. Worklog writes approved artifacts under `.worklog/projects/<project_id>`."
         paths.append("<repo-root>")
         paths.append(str(Path.cwd()))
@@ -1760,10 +2036,10 @@ def storage_provider_guidance(
     if provider_setup and provider_setup.get("suggested_roots"):
         paths = [*provider_setup["suggested_roots"], *paths]
     return {
-        "storage_provider": storage_provider,
-        "backend": backend_for_storage_provider(storage_provider, backend),
+        "sharing_provider": sharing_provider,
+        "backend": backend_for_sharing_provider(sharing_provider, backend),
         "description": description,
-        "storage_provider_setup_status": (provider_setup or {}).get("setup_status"),
+        "sharing_provider_setup_status": (provider_setup or {}).get("setup_status"),
         "suggested_roots": dedupe(paths),
         "example_root": dedupe(paths)[0] if paths else "",
         "resulting_project_dir_example": resulting_project_dir_example(project_id, dedupe(paths)[0] if paths else "<shared-root>"),
@@ -1852,7 +2128,7 @@ def shared_location_from_sharing(sharing: dict[str, Any]) -> dict[str, str]:
 def backend_permission_plan(
     project_id: str,
     backend: str,
-    storage_provider: str | None,
+    sharing_provider: str | None,
     shared_location: dict[str, str],
     permissions: dict[str, Any],
     *,
@@ -1860,11 +2136,11 @@ def backend_permission_plan(
     current_permissions: dict[str, Any] | None = None,
     operation: str = "merge",
 ) -> dict[str, Any]:
-    if backend == "local" and not storage_provider:
+    if backend == "local" and not sharing_provider:
         return {
             "required": False,
             "backend": backend,
-            "storage_provider": storage_provider,
+            "sharing_provider": sharing_provider,
             "members": [],
             "actions": [],
             "provider_permission_note": "Local-only projects do not need backend permission changes.",
@@ -1880,7 +2156,7 @@ def backend_permission_plan(
         if not members_for_action:
             members_for_action = members
         required = bool(members_for_action)
-    provider_name = storage_provider_display_name(storage_provider or "selected_provider")
+    provider_name = sharing_provider_display_name(sharing_provider or "selected_provider")
     project_dir = shared_location.get("shared_project_dir") or resulting_project_dir_example(
         project_id,
         shared_location.get("root") or "<shared-root>",
@@ -1889,12 +2165,12 @@ def backend_permission_plan(
         return {
             "required": False,
             "backend": backend,
-            "storage_provider": storage_provider,
+            "sharing_provider": sharing_provider,
             "members": [],
             "actions": [],
             "provider_permission_note": "No backend permission changes are needed.",
         }
-    if storage_provider == "google_drive":
+    if sharing_provider == "google_drive":
         capability = "google_drive_folder_acl"
         note = (
             "Grant editor access on the Google Drive folder to the listed members. The agent should complete "
@@ -1902,13 +2178,13 @@ def backend_permission_plan(
             "user to apply the permission manually only when no available provider surface can complete it; "
             "do not mark this complete until folder access is actually applied or verified."
         )
-    elif storage_provider == "dropbox":
+    elif sharing_provider == "dropbox":
         capability = "dropbox_folder_member_acl"
         note = "Share the Dropbox folder with the listed members as editors using Dropbox connector, browser, or provider tooling."
-    elif storage_provider == "onedrive":
+    elif sharing_provider == "onedrive":
         capability = "onedrive_sharepoint_folder_acl"
         note = "Share the OneDrive/SharePoint folder with the listed members as editors using Microsoft connector, browser, or provider tooling."
-    elif storage_provider in GIT_STORAGE_PROVIDERS:
+    elif sharing_provider_uses_backend(sharing_provider, "git_repo"):
         capability = "git_repository_collaborators"
         note = "Add the listed members as repository collaborators or team members, then verify push/pull access and branch protections."
     else:
@@ -1917,7 +2193,7 @@ def backend_permission_plan(
     return {
         "required": True,
         "backend": backend,
-        "storage_provider": storage_provider,
+        "sharing_provider": sharing_provider,
         "provider": provider_name,
         "capability": capability,
         "operation": operation,
@@ -1930,7 +2206,7 @@ def backend_permission_plan(
                 "action": "grant" if operation != "remove" else "revoke",
                 "member": member["member"],
                 "worklog_roles": member["worklog_roles"],
-                "backend_role": backend_role_for_member(storage_provider, member["worklog_roles"], operation=operation),
+                "backend_role": backend_role_for_member(sharing_provider, member["worklog_roles"], operation=operation),
             }
             for member in members_for_action
         ],
@@ -1950,10 +2226,10 @@ def backend_permission_members(permissions: dict[str, Any], *, actor: str) -> li
     return list(by_member.values())
 
 
-def backend_role_for_member(storage_provider: str | None, worklog_roles: list[str], *, operation: str) -> str:
+def backend_role_for_member(sharing_provider: str | None, worklog_roles: list[str], *, operation: str) -> str:
     if operation == "remove":
         return "remove_access"
-    if storage_provider in GIT_STORAGE_PROVIDERS:
+    if sharing_provider_uses_backend(sharing_provider, "git_repo"):
         if "maintainers" in worklog_roles:
             return "maintain_or_admin"
         return "write"
@@ -1962,7 +2238,7 @@ def backend_role_for_member(storage_provider: str | None, worklog_roles: list[st
 
 def backend_permission_verification_evidence(
     args: dict[str, Any],
-    storage_provider: str | None,
+    sharing_provider: str | None,
     permission_plan: dict[str, Any],
 ) -> dict[str, Any]:
     raw = args.get("backend_permission_verification")
@@ -1973,13 +2249,13 @@ def backend_permission_verification_evidence(
             "backend_permissions_verified": False,
             "verification_required": bool(permission_plan.get("required")),
         }
-    evidence_provider = sharing_storage_provider_key(raw.get("storage_provider"))
-    if evidence_provider and storage_provider and evidence_provider != storage_provider:
+    evidence_provider = sharing_provider_key(raw.get("sharing_provider"))
+    if evidence_provider and sharing_provider and evidence_provider != sharing_provider:
         return {
             "backend_permissions_verified": False,
             "verification_required": bool(permission_plan.get("required")),
             "provider_permission_note": (
-                f"Ignored permission verification for `{evidence_provider}` because the selected provider is `{storage_provider}`."
+                f"Ignored permission verification for `{evidence_provider}` because the selected provider is `{sharing_provider}`."
             ),
         }
     verified = bool(
@@ -1989,7 +2265,7 @@ def backend_permission_verification_evidence(
         or raw.get("verified")
     )
     result = dict(raw)
-    result["storage_provider"] = storage_provider
+    result["sharing_provider"] = sharing_provider
     result["backend_permissions_verified"] = verified
     result["verification_required"] = bool(permission_plan.get("required"))
     if verified and not clean_optional(result.get("verified_at")):
@@ -2026,9 +2302,105 @@ def actor_from_args(args: dict[str, Any]) -> str:
 
 
 def preserve_project_settings_fields(settings: dict[str, Any], existing: dict[str, Any]) -> None:
-    for key in ("sharing", "permissions", "backend_permissions", "sharing_configured_at", "sharing_confirmation_quote", "sync_state"):
+    for key in (
+        "sharing",
+        "permissions",
+        "backend_permissions",
+        "sharing_configured_at",
+        "sharing_confirmation_quote",
+        "sync_state",
+        "setup_state",
+    ):
         if key in existing and key not in settings:
             settings[key] = existing[key]
+
+
+def project_setup_state(db: Store, settings: dict[str, Any]) -> dict[str, Any]:
+    project_id = clean_optional(settings.get("project_id"))
+    missing_templates = [
+        key
+        for key in ("session_log_template", "project_log_template")
+        if not template_sections(settings.get(key))
+    ]
+    if missing_templates:
+        return {
+            "status": "pending_templates",
+            "missing": missing_templates,
+            "next_required_action": "approve_project_templates_before_logging_work",
+            "updated_at": now(),
+        }
+    latest = db.latest_project_log(project_id, status="approved") if project_id else None
+    if latest is None:
+        authoring = initial_project_log_authoring(settings.get("project_log_template"))
+        return {
+            "status": "pending_initial_project_log",
+            "next_required_action": "llm_collect_initial_project_log_context_then_call_worklog_draft_project_log",
+            "llm_decides_required_sections": True,
+            "section_candidates": authoring["section_candidates"],
+            "updated_at": now(),
+        }
+    return {
+        "status": "complete",
+        "initial_project_log_id": latest["id"],
+        "completed_at": latest.get("approved_at") or latest.get("updated_at"),
+        "updated_at": now(),
+    }
+
+
+def initial_project_log_authoring(project_template: Any) -> dict[str, Any]:
+    candidates = []
+    for section in template_sections(project_template):
+        candidate = {
+            "key": section["key"],
+            "title": section.get("title") or titleize(section["key"]),
+            "kind": section.get("kind", "list"),
+        }
+        if section.get("description"):
+            candidate["description"] = section["description"]
+        if section.get("rollup_from"):
+            candidate["rollup_hint"] = section["rollup_from"]
+        candidates.append(candidate)
+    return {
+        "purpose": "Author the first approved project log so future resume context has durable starting state.",
+        "llm_decides_required_sections": True,
+        "section_candidates": candidates,
+        "next_call": "worklog_draft_project_log",
+    }
+
+
+def attach_project_setup_next_step(result: dict[str, Any], settings: dict[str, Any]) -> None:
+    setup_state = settings.get("setup_state") if isinstance(settings.get("setup_state"), dict) else {}
+    status = setup_state.get("status")
+    if status == "pending_initial_project_log":
+        authoring = initial_project_log_authoring(settings.get("project_log_template"))
+        result["initial_project_log_authoring"] = authoring
+        result["next_required_action"] = setup_state.get(
+            "next_required_action",
+            "llm_collect_initial_project_log_context_then_call_worklog_draft_project_log",
+        )
+        result["text"] = result.get("text", "") + "\n\n" + render_initial_project_log_authoring(authoring)
+    elif status == "pending_templates":
+        result["next_required_action"] = setup_state.get(
+            "next_required_action",
+            "approve_project_templates_before_logging_work",
+        )
+
+
+def mark_project_setup_complete(db: Store, log: dict[str, Any]) -> None:
+    project_id = clean_optional(log.get("project_id"))
+    if not project_id:
+        return
+    settings = db.project_settings(project_id)
+    setup_state = settings.get("setup_state") if isinstance(settings.get("setup_state"), dict) else {}
+    if setup_state.get("status") == "complete":
+        return
+    settings["setup_state"] = {
+        "status": "complete",
+        "initial_project_log_id": log["id"],
+        "completed_at": log.get("approved_at") or now(),
+        "updated_at": now(),
+    }
+    db.write("project_settings", project_id, settings)
 
 
 def sharing_enabled(settings: dict[str, Any]) -> bool:
@@ -2075,6 +2447,14 @@ def source_session_logs_from_args(db: Store, args: dict[str, Any]) -> list[dict[
 def pending_session_logs(db: Store, project_id: str) -> list[dict[str, Any]]:
     latest = db.latest_project_log(project_id, status="approved")
     incorporated = set(latest.get("session_log_ids", [])) if latest else set()
+    return unincorporated_session_logs(db, project_id, incorporated)
+
+
+def pending_session_logs_for_log(db: Store, log: dict[str, Any]) -> list[dict[str, Any]]:
+    return unincorporated_session_logs(db, log["project_id"], set(log.get("session_log_ids", [])))
+
+
+def unincorporated_session_logs(db: Store, project_id: str, incorporated: set[str]) -> list[dict[str, Any]]:
     pending = [
         log
         for log in db.session_logs(project_id, status="approved")
@@ -2264,11 +2644,13 @@ def schemas() -> list[dict[str, Any]]:
                 "project_nature": {"type": "string"},
                 "mode": {"type": "string", "enum": ["create", "join"]},
                 "backend": {"type": "string", "enum": ["shared_directory", "git_repo", "connector_payload"]},
-                "storage_provider": {"type": "string"},
-                "storage_provider_verification": any_object,
+                "sharing_provider": {"type": "string"},
+                "sharing_provider_verification": any_object,
                 "backend_permission_verification": any_object,
                 "root": {"type": "string"},
                 "shared_project_dir": {"type": "string"},
+                "connector": {"type": "string"},
+                "connector_target": {"type": "string"},
                 "permissions": any_object,
                 "backend_permissions": any_object,
                 "publish_policy": {"type": "string"},
@@ -2442,7 +2824,7 @@ def schemas() -> list[dict[str, Any]]:
         ),
         schema(
             "worklog_edit_project_log",
-            "Edit a draft project log. Requires explicit user confirmation.",
+            "Edit a draft project log.",
             {
                 "project_log_id": {"type": "string"},
                 "fields": any_object,
@@ -2456,10 +2838,8 @@ def schemas() -> list[dict[str, Any]]:
                 "rules": text_array,
                 "questions": text_array,
                 "next_actions": text_array,
-                "confirmed_by_user": {"type": "boolean"},
-                "confirmation_quote": {"type": "string"},
             },
-            ["project_log_id", "confirmed_by_user", "confirmation_quote"],
+            ["project_log_id"],
         ),
         schema(
             "worklog_approve_project_log",
@@ -3043,13 +3423,30 @@ def render_session_log(log: dict[str, Any]) -> str:
         output.append(f"- task_id: `{log['task_id']}`")
     render_source_event_range(output, log)
     render_template_sections(output, log)
+    return "\n".join(output)
+
+
+def render_session_log_review_metadata(log: dict[str, Any]) -> str:
+    output = [
+        "Session log review metadata:",
+        f"- session_log_id: `{log['id']}`",
+        f"- status: `{log['status']}`",
+    ]
+    attention = session_log_attention(log)
+    if attention:
+        add_section(output, "Attention", attention)
+    if log["status"] == "draft":
+        output.extend(["", render_session_log_authoring_next_step()])
+    return "\n".join(output)
+
+
+def session_log_attention(log: dict[str, Any]) -> list[str]:
     attention = []
     if not log.get("project_id"):
         attention.append("Add `project_id` before approval.")
-    if not any(section_has_content(value) for value in sections_from_log(log).values()):
+    if not session_log_has_content(log):
         attention.append("This draft seed has no authored session-log sections yet; the assistant should author and edit it before approval.")
-    add_section(output, "Attention", attention)
-    return "\n".join(output)
+    return attention
 
 
 def public_source_events(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -3069,9 +3466,20 @@ def render_session_log_authoring_next_step() -> str:
     return lines(
         "Next:",
         "- The assistant should author the session log from the bounded source-event slice and the user's session-log template.",
+        "- Before asking for approval, run a reflection pass against the source-event slice to check for missed outcomes, decisions, validation, open questions, and next actions.",
         "- Keep raw source events out of chat unless the user asks to inspect them.",
-        "- Then call `worklog_edit_session_log` with the authored sections before asking the user to approve.",
+        "- Then call `worklog_edit_session_log` with the authored sections.",
+        "- After editing, display the exact `session_log_text` to the user and ask whether to edit or approve it. Do not show only the draft ID.",
     )
+
+
+def session_log_reflection_checklist() -> list[str]:
+    return [
+        "Compare the authored session-log sections against the bounded source-event slice.",
+        "Check that important outcomes, decisions, validation, open questions, and next actions are represented in the user's template sections.",
+        "Keep routine command details and raw event text out of chat unless the user asks to inspect source events.",
+        "Confirm the draft has project_id and enough authored section content before requesting approval.",
+    ]
 
 
 def render_source_event_range(output: list[str], log: dict[str, Any]) -> None:
@@ -3165,10 +3573,30 @@ def render_project_rollup_authoring(
             "- Author a coherent project-log draft in the user's project-log format.",
             "- Place facts only in sections where they semantically belong.",
             "- Preserve useful previous project-log content and update it with the approved session log(s).",
+            "- Run a reflection pass before review: check that relevant carry-forward facts are preserved, obsolete facts are removed or updated, and every pending approved session log has been considered.",
             "- Then call `worklog_draft_project_log` with `project_id`, the same `session_log_ids` if applicable, and the authored `sections` or `fields`.",
         ]
     )
     return "\n".join(output)
+
+
+def project_rollup_reflection_checklist() -> list[str]:
+    return [
+        "Compare the authored project-log draft against the previous approved project log.",
+        "Preserve durable carry-forward facts that remain relevant for future resume context.",
+        "Update or remove stale facts instead of copying the previous project log mechanically.",
+        "Check every approved source session log supplied for durable outcomes, decisions, risks, and next actions.",
+        "Keep routine session evidence in session logs unless it materially affects future project resumption.",
+    ]
+
+
+def project_log_reflection_checklist() -> list[str]:
+    return [
+        "Review the exact project-log draft before requesting approval.",
+        "Check that project-log sections contain durable resume state rather than audit-trail detail.",
+        "Confirm relevant carry-forward facts are preserved and stale facts are updated or removed.",
+        "Confirm pending approved session logs are either incorporated into the draft or surfaced as unresolved review metadata.",
+    ]
 
 
 def render_resume(
@@ -3262,12 +3690,12 @@ def render_project_start(
             "",
             "Sharing setup:",
             "- Ask whether this project is local-only or shared with team members.",
-            "- If shared, run the storage setup in order: suggest providers, user selects provider, suggest paths for that provider, user selects path.",
+            "- If shared, run the sharing setup in order: suggest providers, user selects provider, suggest paths or connector targets for that provider, user selects path or target.",
             "- Recommend `shared_directory` for mounted Google Drive/Dropbox/OneDrive/network/Docker paths, `git_repo` for GitHub/GitLab/Bitbucket repository checkouts, or `connector_payload` when an external connector must publish the approved artifacts.",
-            "- If the user has not selected a provider, call `worklog_configure_project_sharing` without `storage_provider` to get provider options.",
-            "- After the user selects a provider, call `worklog_configure_project_sharing` with `storage_provider` to get path options for that provider.",
-            "- Do not configure sharing until the user explicitly confirms both the selected provider and selected path.",
-            "- Configure sharing only after the user approves the backend, storage provider, shared location, contributors, project approvers, and maintainers.",
+            "- If the user has not selected a provider, call `worklog_configure_project_sharing` without `sharing_provider` to get provider options.",
+            "- After the user selects a provider, call `worklog_configure_project_sharing` with `sharing_provider` to get provider-specific setup, path, or connector-target guidance.",
+            "- Do not configure sharing until the user explicitly confirms both the selected provider and selected path or connector target.",
+            "- Configure sharing only after the user approves the backend, sharing provider, shared location or connector target, contributors, project approvers, and maintainers.",
             "- Draft logs remain local; only approved artifacts are shared.",
         ]
     )
@@ -3338,7 +3766,7 @@ def render_template_authoring_lines(brief: dict[str, Any]) -> list[str]:
             "Available source channels:",
             "- " + ", ".join(TEMPLATE_AUTHORING_GUIDANCE["draft_from_options"]),
             "",
-            "Next: the assistant proposes templates in chat, the user edits/approves them, then call `worklog_set_project_templates` with the exact approved objects.",
+            "Next: the assistant proposes templates in chat, the user edits/approves them, then call `worklog_set_project_templates` with the exact approved objects. After templates and sharing mode/backend are selected, collect initial project-log context and draft the first project log before treating setup as complete.",
         ]
     )
     return output
@@ -3350,6 +3778,9 @@ def render_project_templates(settings: dict[str, Any]) -> str:
         "",
         f"- project_nature: `{settings.get('project_nature', 'unconfigured')}`",
     ]
+    setup_state = settings.get("setup_state") if isinstance(settings.get("setup_state"), dict) else {}
+    if setup_state.get("status"):
+        output.append(f"- setup_status: `{setup_state['status']}`")
     for label, key in (
         ("Session Log Template", "session_log_template"),
         ("Project Log Template", "project_log_template"),
@@ -3372,6 +3803,37 @@ def render_project_templates(settings: dict[str, Any]) -> str:
     return "\n".join(output)
 
 
+def render_initial_project_log_authoring(authoring: dict[str, Any]) -> str:
+    output = [
+        "## Initial Project Log Gate",
+        "",
+        "Project setup is not complete until an initial project log is authored, shown to the user, and approved.",
+        "The assistant should decide which project-log sections need starting context for this project and how much detail is appropriate.",
+        "",
+        "Candidate project-log sections:",
+    ]
+    candidates = authoring.get("section_candidates") or []
+    if not candidates:
+        output.append("- None")
+    for section in candidates:
+        details = [f"kind={section.get('kind', 'list')}"]
+        if section.get("rollup_hint"):
+            details.append(f"rollup_hint={section['rollup_hint']}")
+        if section.get("description"):
+            details.append(str(section["description"]))
+        output.append(f"- `{section['key']}`: {section['title']} ({'; '.join(details)})")
+    output.extend(
+        [
+            "",
+            "Next:",
+            "- Ask for or infer the initial project context needed for the relevant sections.",
+            "- Call `worklog_draft_project_log` with `project_id` and authored `sections` or `fields`.",
+            "- Show the exact draft to the user and call `worklog_approve_project_log` only after explicit approval.",
+        ]
+    )
+    return "\n".join(output)
+
+
 def render_project_sharing(
     settings: dict[str, Any],
     *,
@@ -3379,6 +3841,9 @@ def render_project_sharing(
     pending: list[dict[str, Any]],
 ) -> str:
     output = [f"# Worklog Sharing: {settings.get('project_id') or 'default'}", ""]
+    setup_state = settings.get("setup_state") if isinstance(settings.get("setup_state"), dict) else {}
+    if setup_state.get("status"):
+        output.append(f"- setup_status: `{setup_state['status']}`")
     if not sharing_enabled(settings):
         output.append("- sharing: `disabled`")
         return "\n".join(output)
@@ -3388,7 +3853,7 @@ def render_project_sharing(
         [
             f"- sharing: `enabled`",
             f"- backend: `{sharing.get('backend')}`",
-            f"- storage_provider: `{sharing.get('storage_provider') or ''}`",
+            f"- sharing_provider: `{sharing.get('sharing_provider') or ''}`",
             f"- publish_policy: `{sharing.get('publish_policy', 'approved_only')}`",
             f"- configured_by: `{sharing.get('configured_by') or ''}`",
         ]
@@ -3415,19 +3880,19 @@ def render_project_sharing(
     return "\n".join(output)
 
 
-def render_storage_provider_guidance(
+def render_sharing_provider_guidance(
     project_id: str,
     backend: str,
     guidance: dict[str, Any],
     permissions: dict[str, Any],
 ) -> str:
     output = [
-        f"# Choose Worklog Storage Provider: {project_id}",
+        f"# Choose Worklog Sharing Provider: {project_id}",
         "",
-        "Worklog needs the storage provider before it can suggest a shared root path.",
+        "Worklog needs the sharing provider before it can suggest a shared root path.",
         "",
         f"- backend: `{backend}`",
-        "- setup_stage: `choose_storage_provider`",
+        "- setup_stage: `choose_sharing_provider`",
     ]
     if guidance.get("provided_shared_location"):
         output.extend(["", "## Provided Location", ""])
@@ -3436,19 +3901,19 @@ def render_storage_provider_guidance(
         output.extend(
             [
                 "",
-                "Hold this location for now. Do not infer the storage provider from it.",
+                "Hold this location for now. Do not infer the sharing provider from it.",
             ]
         )
-    if any(option.get("backend") != backend for option in guidance.get("storage_provider_options", [])):
+    if any(option.get("backend") != backend for option in guidance.get("sharing_provider_options", [])):
         output.extend(
             [
                 "",
-                "The selected storage provider determines the final backend: mounted folders use `shared_directory`; Git providers use `git_repo`.",
+                "The selected sharing provider determines the final backend: mounted folders use `shared_directory`; Git providers use `git_repo`.",
             ]
         )
-    output.extend(["", "## Storage Provider Options", ""])
-    for option in guidance.get("storage_provider_options", []):
-        output.append(f"### {storage_provider_display_name(option['storage_provider'])}")
+    output.extend(["", "## Sharing Provider Options", ""])
+    for option in guidance.get("sharing_provider_options", []):
+        output.append(f"### {sharing_provider_display_name(option['sharing_provider'])}")
         output.append("")
         output.append(option["description"])
         output.append("")
@@ -3460,8 +3925,8 @@ def render_storage_provider_guidance(
             "",
             "## Next",
             "",
-            "Ask the user to choose one storage provider.",
-            "After they choose, call `worklog_configure_project_sharing` again with `storage_provider` and without final confirmation so Worklog can suggest paths for that provider.",
+            "Ask the user to choose one sharing provider.",
+            "After they choose, call `worklog_configure_project_sharing` again with `sharing_provider` and without final confirmation so Worklog can suggest provider-specific setup, paths, or connector targets.",
         ]
     )
     return "\n".join(output)
@@ -3470,32 +3935,32 @@ def render_storage_provider_guidance(
 def render_shared_location_guidance(
     project_id: str,
     backend: str,
-    storage_provider: str | None,
+    sharing_provider: str | None,
     guidance: dict[str, Any],
     permissions: dict[str, Any],
 ) -> str:
     output = [
         f"# Choose Shared Worklog Location: {project_id}",
         "",
-        "Worklog has the selected storage provider. It now needs the shared root path before it can configure the backend.",
+        "Worklog has the selected sharing provider. It now needs the shared root path before it can configure the backend.",
         "",
         f"- backend: `{backend}`",
         "- setup_stage: `choose_shared_location`",
     ]
-    if storage_provider:
-        output.append(f"- requested_storage_provider: `{storage_provider}`")
-    if guidance.get("storage_provider_setup"):
-        add_section(output, "Storage Provider Setup", guidance["storage_provider_setup"])
+    if sharing_provider:
+        output.append(f"- requested_sharing_provider: `{sharing_provider}`")
+    if guidance.get("sharing_provider_setup"):
+        add_section(output, "Sharing Provider Setup", guidance["sharing_provider_setup"])
     output.extend(["", "## Path Options", ""])
-    example_provider = storage_provider_display_name(storage_provider or "selected_provider")
+    example_provider = sharing_provider_display_name(sharing_provider or "selected_provider")
     example_root = "<shared-root>"
-    for option in guidance.get("storage_provider_options", []):
-        output.append(f"### {storage_provider_display_name(option['storage_provider'])} Paths")
+    for option in guidance.get("sharing_provider_options", []):
+        output.append(f"### {sharing_provider_display_name(option['sharing_provider'])} Paths")
         output.append("")
         output.append(option["description"])
         output.append("")
         if option.get("example_root") and example_root == "<shared-root>":
-            example_provider = storage_provider_display_name(option["storage_provider"])
+            example_provider = sharing_provider_display_name(option["sharing_provider"])
             example_root = option["example_root"]
         output.append("Suggested root paths:")
         for path in option.get("suggested_roots", []):
@@ -3509,10 +3974,10 @@ def render_shared_location_guidance(
             "",
             "## Next",
             "",
-            "If the storage provider setup is ready, ask the user to choose one shared root path, or provide another path for this storage provider.",
-            "If the storage provider setup is not ready, ask for approval to use the provider connector or desktop sync/mount setup first, then call Worklog again with the selected provider.",
-            "For Google Drive, Dropbox, or OneDrive, a local mounted path is not enough to declare cloud sync ready. If Worklog returns `needs_cloud_verification`, ask the user to approve the connector check and pass `storage_provider_verification` after the connector verifies the cloud-side location.",
-            "After they confirm the path, call `worklog_configure_project_sharing` again with `storage_provider`, `root` or `shared_project_dir`, plus `confirmed_by_user: true` and their confirmation quote.",
+            "If the sharing provider setup is ready, ask the user to choose one shared root path, or provide another path for this sharing provider.",
+            "If the sharing provider setup is not ready, ask for approval to use the provider connector or desktop sync/mount setup first, then call Worklog again with the selected provider.",
+            "For Google Drive, Dropbox, or OneDrive, a local mounted path is not enough to declare cloud sync ready. If Worklog returns `needs_cloud_verification`, ask the user to approve the connector check and pass `sharing_provider_verification` after the connector verifies the cloud-side location.",
+            "After they confirm the path, call `worklog_configure_project_sharing` again with `sharing_provider`, `root` or `shared_project_dir`, plus `confirmed_by_user: true` and their confirmation quote.",
             "",
             "Example confirmation prompt:",
             f"- Use {example_provider} at `{example_root}` for `{project_id}`; configure sharing.",
@@ -3521,29 +3986,64 @@ def render_shared_location_guidance(
     return "\n".join(output)
 
 
-def render_storage_provider_verification_required(
+def render_connector_target_guidance(
+    project_id: str,
+    sharing_provider: str | None,
+    guidance: dict[str, Any],
+    permissions: dict[str, Any],
+) -> str:
+    provider_name = sharing_provider_display_name(sharing_provider or "selected_provider")
+    output = [
+        f"# Choose Worklog Connector Target: {project_id}",
+        "",
+        f"- backend: `connector_payload`",
+        f"- sharing_provider: `{sharing_provider or ''}`",
+        f"- provider: {provider_name}",
+        "- setup_stage: `choose_connector_target`",
+    ]
+    if guidance.get("selected_connector_target"):
+        output.append(f"- selected_connector_target: `{guidance['selected_connector_target']}`")
+    if guidance.get("sharing_provider_setup"):
+        add_section(output, "Sharing Provider Setup", guidance["sharing_provider_setup"])
+    add_section(output, "Worklog Policy", permissions)
+    output.extend(["", f"## {provider_name} Targets", ""])
+    targets = [str(item).strip() for item in guidance.get("connector_target_options", []) if str(item).strip()]
+    output.extend([f"- `{target}`" for target in targets] or ["- Ask the user which connector target should receive approved Worklog artifacts."])
+    output.extend(
+        [
+            "",
+            "Next:",
+            "- Ask the user to choose the connector target for approved Worklog artifacts.",
+            "- After they confirm the target, call `worklog_configure_project_sharing` again with `sharing_provider`, `connector_target`, `confirmed_by_user: true`, and their confirmation quote.",
+            "- Do not claim backend publishing is verified until connector/API/browser evidence has been applied or recorded.",
+        ]
+    )
+    return "\n".join(output)
+
+
+def render_sharing_provider_verification_required(
     project_id: str,
     backend: str,
-    storage_provider: str,
+    sharing_provider: str,
     shared_location: dict[str, str],
     provider_setup: dict[str, Any],
     permissions: dict[str, Any],
 ) -> str:
-    provider_name = storage_provider_display_name(storage_provider)
+    provider_name = sharing_provider_display_name(sharing_provider)
     output = [
-        f"# Verify Worklog Storage Provider: {project_id}",
+        f"# Verify Worklog Sharing Provider: {project_id}",
         "",
         f"Worklog has the selected {provider_name} location, but it has not verified the cloud-side sync/connection.",
         "",
         f"- backend: `{backend}`",
-        f"- storage_provider: `{storage_provider}`",
-        "- setup_stage: `verify_storage_provider_connection`",
+        f"- sharing_provider: `{sharing_provider}`",
+        "- setup_stage: `verify_sharing_provider_connection`",
     ]
     if shared_location:
         output.extend(["", "## Selected Location", ""])
         for key, value in shared_location.items():
             output.append(f"- {key}: `{value}`")
-    add_section(output, "Storage Provider Setup", provider_setup)
+    add_section(output, "Sharing Provider Setup", provider_setup)
     add_section(output, "Current Worklog Policy", permissions)
     output.extend(
         [
@@ -3555,12 +4055,12 @@ def render_storage_provider_verification_required(
             "If the user has already approved the Worklog sharing setup, do not ask them to re-approve that same setup; ask only for the missing connector permission, browser permission, API permission, or provider sign-in.",
             "If provider tooling opens a sign-in page, tell the user exactly which provider account or surface needs sign-in, then continue from that authenticated surface.",
             "Do not claim the shared project is synced or ready from Worklog's side until connector/cloud verification succeeds.",
-            "After verification succeeds, call `worklog_configure_project_sharing` again with the same selected location, `confirmed_by_user: true`, and `storage_provider_verification`.",
+            "After verification succeeds, call `worklog_configure_project_sharing` again with the same selected location, `confirmed_by_user: true`, and `sharing_provider_verification`.",
             "",
-            "The `storage_provider_verification` object should include:",
-            f"- `storage_provider`: `{storage_provider}`",
+            "The `sharing_provider_verification` object should include:",
+            f"- `sharing_provider`: `{sharing_provider}`",
             "- `provider_connection_verified`: `true`",
-            f"- `verification_scope`: `{storage_provider}_connector`",
+            f"- `verification_scope`: `{sharing_provider}_connector`",
             "- `verified_at`: current timestamp, if available",
             "- `provider_connection_note`: concise note about what the connector verified",
         ]
@@ -3571,19 +4071,19 @@ def render_storage_provider_verification_required(
 def render_backend_permission_plan_required(
     project_id: str,
     backend: str,
-    storage_provider: str | None,
+    sharing_provider: str | None,
     shared_location: dict[str, str],
     permission_plan: dict[str, Any],
     permission_verification: dict[str, Any],
 ) -> str:
-    provider_name = permission_plan.get("provider") or storage_provider_display_name(storage_provider or "selected_provider")
+    provider_name = permission_plan.get("provider") or sharing_provider_display_name(sharing_provider or "selected_provider")
     output = [
         f"# Apply Worklog Backend Permissions: {project_id}",
         "",
         "Worklog has the requested members policy, but the shared backend permissions still need to be applied or verified.",
         "",
         f"- backend: `{backend}`",
-        f"- storage_provider: `{storage_provider or ''}`",
+        f"- sharing_provider: `{sharing_provider or ''}`",
         "- setup_stage: `apply_backend_permissions`",
     ]
     if shared_location:
@@ -3595,7 +4095,7 @@ def render_backend_permission_plan_required(
             "",
             "## Backend Permission Actions",
             "",
-            permission_plan.get("provider_permission_note") or "Apply the listed permission changes in the storage backend.",
+            permission_plan.get("provider_permission_note") or "Apply the listed permission changes in the sharing backend.",
             "",
         ]
     )
@@ -3620,7 +4120,7 @@ def render_backend_permission_plan_required(
             "After backend permission changes succeed, re-check the backend ACL or repository permission list, then call the Worklog tool again with `backend_permission_verification`.",
             "",
             "The `backend_permission_verification` object should include:",
-            f"- `storage_provider`: `{storage_provider or ''}`",
+            f"- `sharing_provider`: `{sharing_provider or ''}`",
             "- `backend_permissions_verified`: `true`",
             f"- `verification_scope`: `{permission_plan.get('capability') or 'backend_permissions'}`",
             "- `members`: the members whose backend access was applied or verified",
@@ -3720,6 +4220,20 @@ def render_pending_project_updates(pending: list[dict[str, Any]]) -> str:
             "Next: a project approver should call `worklog_draft_project_log` for this project, author the rollup, and approve the new project log.",
         ]
     )
+    return "\n".join(output)
+
+
+def render_project_log_review_metadata(log: dict[str, Any], pending: list[dict[str, Any]]) -> str:
+    output = [
+        "Project log review metadata:",
+        f"- project_log_id: `{log['id']}`",
+        f"- status: `{log['status']}`",
+        f"- source_session_logs: {len(log.get('session_log_ids', []))}",
+        f"- pending_project_updates_for_this_log: {len(pending)}",
+    ]
+    if pending:
+        output.append("")
+        output.append(render_pending_project_updates(pending))
     return "\n".join(output)
 
 
@@ -3901,6 +4415,14 @@ def section_has_content(value: Any) -> bool:
     return bool(str(value).strip())
 
 
+def session_log_has_content(log: dict[str, Any]) -> bool:
+    return any(section_has_content(value) for value in sections_from_log(log).values())
+
+
+def project_log_has_content(log: dict[str, Any]) -> bool:
+    return any(section_has_content(value) for value in sections_from_log(log).values())
+
+
 def section_key(value: Any) -> str:
     key = re.sub(r"[^A-Za-z0-9]+", "_", str(value).strip().lower()).strip("_")
     return key or "section"
@@ -3933,6 +4455,8 @@ def project_index(db: Store) -> list[dict[str, Any]]:
             project = item(settings["project_id"])
             project["counts"]["project_settings"] += 1
             project["project_nature"] = settings.get("project_nature")
+            setup_state = project_setup_state(db, settings)
+            project["setup_status"] = setup_state.get("status")
             if sharing_enabled(settings):
                 project["sharing_backend"] = settings.get("sharing", {}).get("backend")
             project["session_log_template"] = (
@@ -4004,6 +4528,8 @@ def project_line(project: dict[str, Any]) -> str:
         details.append(counts)
     if project.get("sharing_backend"):
         details.append(f"shared: `{project['sharing_backend']}`")
+    if project.get("setup_status") and project["setup_status"] != "complete":
+        details.append(f"setup_status: `{project['setup_status']}`")
     if project.get("pending_project_log_updates"):
         details.append(f"pending_project_log_updates: {project['pending_project_log_updates']}")
     if project.get("match_score"):
