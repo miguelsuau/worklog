@@ -34,10 +34,71 @@ DEFAULT_STORE = str(Path.home() / ".worklog" / "store")
 MAX_EVENT_TEXT = 5000
 SHARED_LAYOUT_VERSION = 1
 SHARING_BACKENDS = {"shared_directory", "git_repo", "connector_payload"}
-MOUNTED_SHARING_PROVIDERS = ["google_drive", "dropbox", "onedrive", "network_folder", "local_folder", "docker_mount"]
-CLOUD_SYNC_SHARING_PROVIDERS = ["google_drive", "dropbox", "onedrive"]
-GIT_SHARING_PROVIDERS = ["github", "gitlab", "bitbucket"]
-CONNECTOR_SHARING_PROVIDERS = ["linear"]
+SHARING_PROVIDERS: dict[str, dict[str, Any]] = {
+    "google_drive": {
+        "backend": "shared_directory",
+        "kind": "cloud_sync_path",
+        "display_name": "Google Drive",
+        "description": "Mounted Google Drive folder via Google Drive for desktop.",
+        "requires_cloud_verification": True,
+    },
+    "dropbox": {
+        "backend": "shared_directory",
+        "kind": "cloud_sync_path",
+        "display_name": "Dropbox",
+        "description": "Mounted Dropbox folder.",
+        "requires_cloud_verification": True,
+    },
+    "onedrive": {
+        "backend": "shared_directory",
+        "kind": "cloud_sync_path",
+        "display_name": "OneDrive/SharePoint",
+        "description": "Mounted OneDrive or SharePoint-synced folder.",
+        "requires_cloud_verification": True,
+    },
+    "network_folder": {
+        "backend": "shared_directory",
+        "kind": "mounted_path",
+        "display_name": "Network Folder",
+        "description": "Mounted team or network share.",
+    },
+    "local_folder": {
+        "backend": "shared_directory",
+        "kind": "mounted_path",
+        "display_name": "Local Folder",
+        "description": "Local folder that another sync app or OS sharing layer manages.",
+    },
+    "docker_mount": {
+        "backend": "shared_directory",
+        "kind": "mounted_path",
+        "display_name": "Docker Mount",
+        "description": "Docker bind mount or volume visible to the process running Worklog.",
+    },
+    "github": {
+        "backend": "git_repo",
+        "kind": "git",
+        "display_name": "GitHub",
+        "description": "Local checkout of a GitHub repository.",
+    },
+    "gitlab": {
+        "backend": "git_repo",
+        "kind": "git",
+        "display_name": "GitLab",
+        "description": "Local checkout of a GitLab repository.",
+    },
+    "bitbucket": {
+        "backend": "git_repo",
+        "kind": "git",
+        "display_name": "Bitbucket",
+        "description": "Local checkout of a Bitbucket repository.",
+    },
+    "linear": {
+        "backend": "connector_payload",
+        "kind": "connector",
+        "display_name": "Linear",
+        "description": "Linear project-management or ticketing workspace managed through connector/API/browser tooling.",
+    },
+}
 
 DEFAULT_SESSION_TEMPLATE = {
     "name": "Unconfigured Session Log",
@@ -1361,17 +1422,32 @@ def backend_requires_location(backend: str) -> bool:
 
 
 def backend_for_sharing_provider(sharing_provider: str | None, requested_backend: str) -> str:
-    if sharing_provider in CONNECTOR_SHARING_PROVIDERS:
-        return "connector_payload"
-    if sharing_provider in GIT_SHARING_PROVIDERS:
-        return "git_repo"
-    if sharing_provider in MOUNTED_SHARING_PROVIDERS:
-        return "shared_directory"
-    return requested_backend
+    return sharing_provider_backend(sharing_provider) or requested_backend
 
 
 def sharing_provider_requires_cloud_verification(sharing_provider: str | None) -> bool:
-    return sharing_provider in CLOUD_SYNC_SHARING_PROVIDERS
+    return bool(sharing_provider_meta(sharing_provider).get("requires_cloud_verification"))
+
+
+def sharing_provider_backend(sharing_provider: str | None) -> str | None:
+    backend = sharing_provider_meta(sharing_provider).get("backend")
+    return backend if isinstance(backend, str) else None
+
+
+def sharing_provider_kind(sharing_provider: str | None) -> str | None:
+    kind = sharing_provider_meta(sharing_provider).get("kind")
+    return kind if isinstance(kind, str) else None
+
+
+def sharing_provider_meta(sharing_provider: str | None) -> dict[str, Any]:
+    if not sharing_provider:
+        return {}
+    meta = SHARING_PROVIDERS.get(sharing_provider)
+    return meta if isinstance(meta, dict) else {}
+
+
+def sharing_provider_uses_backend(sharing_provider: str | None, backend: str) -> bool:
+    return sharing_provider_backend(sharing_provider) == backend
 
 
 def has_shared_location(args: dict[str, Any]) -> bool:
@@ -1439,7 +1515,7 @@ def sharing_provider_key(value: Any) -> str | None:
 def sharing_provider_verification(config: dict[str, Any]) -> dict[str, Any]:
     provider = clean_optional(config.get("sharing_provider"))
     setup = config.get("sharing_provider_setup") if isinstance(config.get("sharing_provider_setup"), dict) else {}
-    if provider in MOUNTED_SHARING_PROVIDERS:
+    if sharing_provider_uses_backend(provider, "shared_directory"):
         verification_scope = setup.get("verification_scope") or "local_filesystem_mount"
         provider_connection_verified = bool(setup.get("provider_connection_verified", False))
         if sharing_provider_requires_cloud_verification(provider) and verification_scope in {
@@ -1466,7 +1542,7 @@ def sharing_provider_verification(config: dict[str, Any]) -> dict[str, Any]:
                 )
             ),
         }
-    if provider in GIT_SHARING_PROVIDERS:
+    if sharing_provider_uses_backend(provider, "git_repo"):
         return {
             "sharing_provider": provider,
             "sharing_provider_setup_status": setup.get("setup_status") or "unknown",
@@ -1478,7 +1554,7 @@ def sharing_provider_verification(config: dict[str, Any]) -> dict[str, Any]:
                 "the Git provider or verify remote push/pull access."
             ),
         }
-    if provider in CONNECTOR_SHARING_PROVIDERS:
+    if sharing_provider_uses_backend(provider, "connector_payload"):
         return {
             "sharing_provider": provider,
             "sharing_provider_setup_status": setup.get("setup_status") or "needs_connector_verification",
@@ -1510,11 +1586,11 @@ def setup_sharing_provider(
             "provider_connection_verified": False,
             "suggested_roots": [],
         }
-    if sharing_provider in MOUNTED_SHARING_PROVIDERS:
+    if sharing_provider_uses_backend(sharing_provider, "shared_directory"):
         return setup_mounted_sharing_provider(project_id, backend, sharing_provider, args)
-    if sharing_provider in GIT_SHARING_PROVIDERS:
+    if sharing_provider_uses_backend(sharing_provider, "git_repo"):
         return setup_git_sharing_provider(project_id, backend, sharing_provider, args)
-    if sharing_provider in CONNECTOR_SHARING_PROVIDERS:
+    if sharing_provider_uses_backend(sharing_provider, "connector_payload"):
         return setup_connector_sharing_provider(project_id, backend, sharing_provider, args)
     return {
         "sharing_provider": sharing_provider,
@@ -1710,28 +1786,15 @@ def nearest_git_root(start: Path) -> Path | None:
 
 
 def git_provider_display_name(sharing_provider: str) -> str:
-    names = {
-        "github": "GitHub",
-        "gitlab": "GitLab",
-        "bitbucket": "Bitbucket",
-    }
-    return names.get(sharing_provider, "Git")
+    display_name = sharing_provider_meta(sharing_provider).get("display_name")
+    return display_name if isinstance(display_name, str) else "Git"
 
 
 def sharing_provider_display_name(sharing_provider: str) -> str:
-    names = {
-        "google_drive": "Google Drive",
-        "dropbox": "Dropbox",
-        "onedrive": "OneDrive/SharePoint",
-        "network_folder": "Network Folder",
-        "local_folder": "Local Folder",
-        "docker_mount": "Docker Mount",
-        "linear": "Linear",
-        "selected_provider": "the selected provider",
-    }
-    if sharing_provider in GIT_SHARING_PROVIDERS:
-        return git_provider_display_name(sharing_provider)
-    return names.get(sharing_provider, titleize(sharing_provider))
+    if sharing_provider == "selected_provider":
+        return "the selected provider"
+    display_name = sharing_provider_meta(sharing_provider).get("display_name")
+    return display_name if isinstance(display_name, str) else titleize(sharing_provider)
 
 
 def connector_provider_suggested_targets(project_id: str, sharing_provider: str) -> list[str]:
@@ -1831,32 +1894,24 @@ def sharing_provider_selection_guidance(project_id: str, backend: str) -> dict[s
 
 
 def sharing_providers_for_backend(backend: str) -> list[str]:
-    if backend == "git_repo":
-        return list(GIT_SHARING_PROVIDERS)
-    if backend == "connector_payload":
-        return list(CONNECTOR_SHARING_PROVIDERS)
     if backend == "shared_directory":
-        return [*MOUNTED_SHARING_PROVIDERS, *GIT_SHARING_PROVIDERS, *CONNECTOR_SHARING_PROVIDERS]
+        return list(SHARING_PROVIDERS)
+    if backend in SHARING_BACKENDS:
+        return [
+            provider
+            for provider, meta in SHARING_PROVIDERS.items()
+            if meta.get("backend") == backend
+        ]
     return []
 
 
 def sharing_provider_summary(backend: str, sharing_provider: str) -> dict[str, Any]:
-    descriptions = {
-        "google_drive": "Mounted Google Drive folder via Google Drive for desktop.",
-        "dropbox": "Mounted Dropbox folder.",
-        "onedrive": "Mounted OneDrive or SharePoint-synced folder.",
-        "network_folder": "Mounted team or network share.",
-        "local_folder": "Local folder that another sync app or OS sharing layer manages.",
-        "docker_mount": "Docker bind mount or volume visible to the process running Worklog.",
-        "github": "Local checkout of a GitHub repository.",
-        "gitlab": "Local checkout of a GitLab repository.",
-        "bitbucket": "Local checkout of a Bitbucket repository.",
-        "linear": "Linear project-management or ticketing workspace managed through connector/API/browser tooling.",
-    }
+    description = sharing_provider_meta(sharing_provider).get("description")
     return {
         "sharing_provider": sharing_provider,
+        "sharing_provider_kind": sharing_provider_kind(sharing_provider) or "custom",
         "backend": backend_for_sharing_provider(sharing_provider, backend),
-        "description": descriptions.get(sharing_provider, "Custom shared location provider."),
+        "description": description if isinstance(description, str) else "Custom shared location provider.",
     }
 
 
@@ -1954,7 +2009,7 @@ def sharing_provider_guidance(
         description = "Docker bind mount or volume visible to the process running Worklog."
         paths.append("/workspace/shared-worklog")
         paths.append("/worklog-shared")
-    elif sharing_provider in GIT_SHARING_PROVIDERS:
+    elif sharing_provider_uses_backend(sharing_provider, "git_repo"):
         provider_name = git_provider_display_name(sharing_provider)
         description = f"Local {provider_name} repository root. Worklog writes approved artifacts under `.worklog/projects/<project_id>`."
         paths.append("<repo-root>")
@@ -2113,7 +2168,7 @@ def backend_permission_plan(
     elif sharing_provider == "onedrive":
         capability = "onedrive_sharepoint_folder_acl"
         note = "Share the OneDrive/SharePoint folder with the listed members as editors using Microsoft connector, browser, or provider tooling."
-    elif sharing_provider in GIT_SHARING_PROVIDERS:
+    elif sharing_provider_uses_backend(sharing_provider, "git_repo"):
         capability = "git_repository_collaborators"
         note = "Add the listed members as repository collaborators or team members, then verify push/pull access and branch protections."
     else:
@@ -2158,7 +2213,7 @@ def backend_permission_members(permissions: dict[str, Any], *, actor: str) -> li
 def backend_role_for_member(sharing_provider: str | None, worklog_roles: list[str], *, operation: str) -> str:
     if operation == "remove":
         return "remove_access"
-    if sharing_provider in GIT_SHARING_PROVIDERS:
+    if sharing_provider_uses_backend(sharing_provider, "git_repo"):
         if "maintainers" in worklog_roles:
             return "maintain_or_admin"
         return "write"
