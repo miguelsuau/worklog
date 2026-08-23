@@ -51,12 +51,12 @@ For shared projects, the assistant should guide setup in stages:
 
 1. Ask whether the project should be shared.
 2. Ask the user to choose a storage provider, such as Google Drive, Dropbox,
-   OneDrive, a network folder, a Docker-mounted folder, GitHub, GitLab, or
-   Bitbucket.
+   OneDrive, a network folder, a Docker-mounted folder, GitHub, GitLab,
+   Bitbucket, or a connector-backed project-management system such as Linear.
 3. Build or inspect the selected provider setup.
-4. Suggest provider-specific paths or repositories.
+4. Suggest provider-specific paths, repositories, or connector targets.
 5. Configure the project only after the user confirms the provider and
-   location.
+   location or connector target.
 
 Worklog also separates project roles:
 
