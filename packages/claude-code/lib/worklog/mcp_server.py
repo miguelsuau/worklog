@@ -34,6 +34,15 @@ DEFAULT_STORE = str(Path.home() / ".worklog" / "store")
 MAX_EVENT_TEXT = 5000
 SHARED_LAYOUT_VERSION = 1
 SHARING_BACKENDS = {"shared_directory", "git_repo", "connector_payload"}
+PROJECT_LOG_REVIEW_BOILERPLATE_EXACT = {
+    "review and approve this project log draft",
+    "review this project log draft",
+    "review this project log draft and either request edits or explicitly approve it",
+    "review this project log draft and either request changes or explicitly approve it",
+    "review this project log draft and request edits or approve it",
+    "review this project log draft and approve it",
+    "approve this project log draft",
+}
 SHARING_PROVIDERS: dict[str, dict[str, Any]] = {
     "google_drive": {
         "backend": "shared_directory",
@@ -903,10 +912,15 @@ class Server:
             draft["session_log_ids"] = dedupe([*draft["session_log_ids"], *source_ids])
         draft["updated_at"] = now()
         self.db.write("project_logs", draft["id"], draft)
+        pending = pending_session_logs_for_log(self.db, draft)
+        review_metadata_text = render_project_log_review_metadata(draft, pending)
         return {
             "project_log": draft,
             "project_log_text": render_project_log(draft),
             "presentation_guidance": rendered_log_presentation_guidance("project log"),
+            "attention": project_log_attention(draft),
+            "review_metadata_text": review_metadata_text,
+            "pending_project_updates": pending,
             "reflection_checklist": project_log_reflection_checklist(),
             "text": render_project_log(draft),
         }
@@ -929,6 +943,7 @@ class Server:
             "pending_project_updates": pending,
             "project_log_text": project_log_text,
             "presentation_guidance": rendered_log_presentation_guidance("project log"),
+            "attention": project_log_attention(log),
             "review_metadata_text": review_metadata_text,
             "reflection_checklist": project_log_reflection_checklist(),
             "text": project_log_text,
@@ -944,10 +959,15 @@ class Server:
         apply_project_patch(log, patch)
         log["updated_at"] = now()
         self.db.write("project_logs", log["id"], log)
+        pending = pending_session_logs_for_log(self.db, log)
+        review_metadata_text = render_project_log_review_metadata(log, pending)
         return {
             "project_log": log,
             "project_log_text": render_project_log(log),
             "presentation_guidance": rendered_log_presentation_guidance("project log"),
+            "attention": project_log_attention(log),
+            "review_metadata_text": review_metadata_text,
+            "pending_project_updates": pending,
             "reflection_checklist": project_log_reflection_checklist(),
             "text": render_project_log(log),
         }
@@ -966,6 +986,12 @@ class Server:
             )
         if previous is None and not project_log_has_content(log):
             raise UserError("The initial project log needs authored project context before approval.")
+        blockers = project_log_approval_blockers(log)
+        if blockers:
+            raise UserError(
+                "Remove review-loop instructions from the approvable project log before approval: "
+                + " ".join(blockers)
+            )
         approved_at = now()
         if previous and previous["id"] != log["id"]:
             previous["status"] = "superseded"
@@ -3594,9 +3620,95 @@ def project_log_reflection_checklist() -> list[str]:
     return [
         "Review the exact project-log draft before requesting approval.",
         "Check that project-log sections contain durable resume state rather than audit-trail detail.",
+        "Move review-loop instructions such as approving the draft out of project-log sections and into review metadata.",
         "Confirm relevant carry-forward facts are preserved and stale facts are updated or removed.",
         "Confirm pending approved session logs are either incorporated into the draft or surfaced as unresolved review metadata.",
     ]
+
+
+def project_log_attention(log: dict[str, Any]) -> list[str]:
+    return [finding["message"] for finding in project_log_review_boilerplate_findings(log)]
+
+
+def project_log_approval_blockers(log: dict[str, Any]) -> list[str]:
+    return [
+        finding["message"]
+        for finding in project_log_review_boilerplate_findings(log)
+        if finding["severity"] == "block"
+    ]
+
+
+def project_log_review_boilerplate_findings(log: dict[str, Any]) -> list[dict[str, str]]:
+    findings = []
+    next_action_keys = project_log_next_action_keys(log)
+    for section, item in project_log_text_items(log):
+        normalized = normalize_review_boilerplate_text(item)
+        if not normalized:
+            continue
+        section_title = titleize(section)
+        if normalized in PROJECT_LOG_REVIEW_BOILERPLATE_EXACT:
+            findings.append(
+                {
+                    "severity": "block",
+                    "message": (
+                        f"`{section_title}` contains review-loop boilerplate that belongs in review metadata, "
+                        f"not durable project state: {item}"
+                    ),
+                }
+            )
+            continue
+        if section in next_action_keys and looks_like_project_log_review_boilerplate(normalized):
+            findings.append(
+                {
+                    "severity": "warn",
+                    "message": (
+                        f"`{section_title}` may contain review-loop metadata rather than durable next work: {item}"
+                    ),
+                }
+            )
+    return findings
+
+
+def project_log_text_items(log: dict[str, Any]) -> list[tuple[str, str]]:
+    items = []
+    for section, value in sections_from_log(log).items():
+        for text in section_text_items(value):
+            items.append((section, text))
+    return items
+
+
+def section_text_items(value: Any) -> list[str]:
+    if isinstance(value, str):
+        text = value.strip()
+        return [text] if text else []
+    if isinstance(value, list):
+        return [str(item).strip() for item in value if str(item).strip()]
+    return []
+
+
+def project_log_next_action_keys(log: dict[str, Any]) -> set[str]:
+    keys = {"next_actions", "next_action", "next_steps", "next_step", "follow_ups", "follow_up", "todos", "todo"}
+    for definition in template_sections(log.get("template")):
+        key = definition["key"]
+        title = normalize_review_boilerplate_text(definition.get("title") or key)
+        key_text = normalize_review_boilerplate_text(key)
+        if "next action" in title or "next step" in title or "follow up" in title:
+            keys.add(key)
+        if "next" in key_text or "follow up" in key_text or "todo" in key_text:
+            keys.add(key)
+    return keys
+
+
+def normalize_review_boilerplate_text(value: Any) -> str:
+    text = str(value).lower().replace("project-log", "project log")
+    text = re.sub(r"`([^`]*)`", r"\1", text)
+    return re.sub(r"[^a-z0-9]+", " ", text).strip()
+
+
+def looks_like_project_log_review_boilerplate(normalized: str) -> bool:
+    if "project log" not in normalized or "draft" not in normalized:
+        return False
+    return any(term in normalized for term in ("review", "approve", "request edits", "request changes"))
 
 
 def render_resume(
@@ -4231,6 +4343,9 @@ def render_project_log_review_metadata(log: dict[str, Any], pending: list[dict[s
         f"- source_session_logs: {len(log.get('session_log_ids', []))}",
         f"- pending_project_updates_for_this_log: {len(pending)}",
     ]
+    attention = project_log_attention(log)
+    if attention:
+        add_section(output, "Attention", attention)
     if pending:
         output.append("")
         output.append(render_pending_project_updates(pending))

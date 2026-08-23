@@ -133,6 +133,7 @@ Project logs are resume state, not an audit trail. Prefer durable facts future w
 - next actions
 
 Do not carry over routine session details such as exact commands, exhaustive file lists, validation receipts, intermediate status updates, or conversational Q&A unless they materially affect future project decisions or resumption. Keep those details in the session log.
+Do not include review-loop mechanics such as "review this draft" or "approve this project log" inside project-log sections. Those belong in review metadata or the surrounding chat, not in the approvable project log.
 
 3. Before storing the draft, run a reflection pass: check that useful carry-forward facts from the previous approved project log are preserved, stale facts are updated or removed, and every supplied approved session log has been considered.
 4. Call `worklog_draft_project_log` again with the same `session_log_id` or `session_log_ids` plus the authored `sections` or `fields`. Worklog stores this as a draft; it should not mechanically generate the rollup.

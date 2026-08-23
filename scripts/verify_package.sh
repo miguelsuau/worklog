@@ -38,6 +38,60 @@ python3 -m py_compile \
   "${repo_root}/packages/codex/lib/worklog/mcp_server.py"
 
 python3 - <<'PY'
+import os
+import sys
+from pathlib import Path
+
+repo = Path(os.environ["WORKLOG_REPO_ROOT"])
+sys.path.insert(0, str(repo / "src"))
+
+from worklog.mcp_server import (  # noqa: E402
+    project_log_approval_blockers,
+    project_log_attention,
+    render_project_log_review_metadata,
+)
+
+
+def project_log(next_actions):
+    return {
+        "id": "project_log_guardrail_test",
+        "project_id": "project_guardrail_test",
+        "status": "draft",
+        "version": 2,
+        "session_log_ids": [],
+        "template": {
+            "sections": [
+                {
+                    "key": "next_actions",
+                    "title": "Next Actions",
+                    "kind": "list",
+                }
+            ]
+        },
+        "sections": {
+            "next_actions": next_actions,
+        },
+    }
+
+
+blocked = project_log(["Review this project-log draft and either request edits or explicitly approve it."])
+if not project_log_approval_blockers(blocked):
+    raise SystemExit("Expected exact project-log review boilerplate to block approval.")
+if "Attention" not in render_project_log_review_metadata(blocked, []):
+    raise SystemExit("Expected project-log review boilerplate to appear in review metadata.")
+
+warned = project_log(["Please review this project-log draft with the project approver."])
+if not project_log_attention(warned):
+    raise SystemExit("Expected likely project-log review boilerplate to produce attention.")
+if project_log_approval_blockers(warned):
+    raise SystemExit("Only exact project-log review boilerplate should block approval.")
+
+clean = project_log(["Verify live Worklog MCP responses in a fresh or reloaded task."])
+if project_log_attention(clean):
+    raise SystemExit("Durable next actions should not trigger project-log review boilerplate attention.")
+PY
+
+python3 - <<'PY'
 import json
 import os
 from pathlib import Path
