@@ -147,7 +147,7 @@ For shared projects, only a project approver should approve the project log. If 
 - Never claim a session log or project log is approved until the approval tool succeeds.
 - Do not infer approval from silence or general positivity.
 - Do not require explicit user approval for ordinary draft mutation. Explicit approval is required for approving/finalizing logs, template changes, sharing changes, and publishing boundaries.
-- When a substantive Worklog-tracked task is complete and a session log is drafted or edited, display the exact rendered session-log draft text to the user and ask for review or explicit approval before final wrap-up. A draft ID alone is not sufficient review.
+- When a substantive Worklog-tracked task is complete and a session log is drafted or edited, display the exact rendered session-log draft text in the same response that reports task completion, then ask for review or explicit approval. Do not wait for a later user turn. A draft ID alone is not sufficient review.
 - Treat resume context as reviewed Worklog state, not as raw event history.
 - Keep source events local and out of chat unless the user asks to inspect them.
 - The user's template is authoritative. Preserve their section names and format.

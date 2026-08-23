@@ -725,7 +725,9 @@ class Server:
             "text": session_log_text,
         }
         if log["status"] == "draft":
-            result["next_required_action"] = "show_session_log_text_to_user_then_ask_for_review_or_explicit_approval"
+            result["next_required_action"] = (
+                "show_session_log_text_in_same_completion_response_then_ask_for_review_or_explicit_approval"
+            )
         return result
 
     def edit_session_log(self, args: dict[str, Any]) -> dict[str, Any]:
@@ -751,7 +753,9 @@ class Server:
             "session_log_text": session_log_text,
             "review_metadata_text": render_session_log_review_metadata(log),
             "reflection_checklist": session_log_reflection_checklist(),
-            "next_required_action": "show_session_log_text_to_user_then_ask_for_review_or_explicit_approval",
+            "next_required_action": (
+                "show_session_log_text_in_same_completion_response_then_ask_for_review_or_explicit_approval"
+            ),
             "text": session_log_text,
         }
 
