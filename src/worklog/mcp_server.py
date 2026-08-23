@@ -718,12 +718,15 @@ class Server:
     def show_session_log(self, args: dict[str, Any]) -> dict[str, Any]:
         log = self.db.read("session_logs", required(args, "session_log_id"))
         session_log_text = render_session_log(log)
-        return {
+        result = {
             "session_log": log,
             "session_log_text": session_log_text,
             "review_metadata_text": render_session_log_review_metadata(log),
             "text": session_log_text,
         }
+        if log["status"] == "draft":
+            result["next_required_action"] = "show_session_log_text_to_user_then_ask_for_review_or_explicit_approval"
+        return result
 
     def edit_session_log(self, args: dict[str, Any]) -> dict[str, Any]:
         log = self.db.read("session_logs", required(args, "session_log_id"))
@@ -748,6 +751,7 @@ class Server:
             "session_log_text": session_log_text,
             "review_metadata_text": render_session_log_review_metadata(log),
             "reflection_checklist": session_log_reflection_checklist(),
+            "next_required_action": "show_session_log_text_to_user_then_ask_for_review_or_explicit_approval",
             "text": session_log_text,
         }
 
@@ -3389,7 +3393,8 @@ def render_session_log_authoring_next_step() -> str:
         "- The assistant should author the session log from the bounded source-event slice and the user's session-log template.",
         "- Before asking for approval, run a reflection pass against the source-event slice to check for missed outcomes, decisions, validation, open questions, and next actions.",
         "- Keep raw source events out of chat unless the user asks to inspect them.",
-        "- Then call `worklog_edit_session_log` with the authored sections before asking the user to approve.",
+        "- Then call `worklog_edit_session_log` with the authored sections.",
+        "- After editing, display the exact `session_log_text` to the user and ask whether to edit or approve it. Do not show only the draft ID.",
     )
 
 
