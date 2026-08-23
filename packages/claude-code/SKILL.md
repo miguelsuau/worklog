@@ -111,7 +111,7 @@ If a contributor approves a session log but lacks project-log approval permissio
 5. Call `worklog_draft_session_log` to create a source-bounded draft seed. Worklog returns the bounded source-event slice as private authoring context; do not paste raw source events into chat unless the user asks to inspect them.
 6. As the assistant, author the session log sections from the bounded source-event slice and the user's approved session-log template.
 7. Run a reflection pass against the bounded source-event slice before asking for approval: check that important outcomes, decisions, validation, open questions, and next actions are represented in the user's template sections without exposing raw source events.
-8. Call `worklog_edit_session_log` with the authored sections, then show the exact rendered session log draft text in chat and ask the user whether to edit or approve it. Do not summarize the draft, show only its ID, or send a final task-completion response before showing the draft. Treat attention/status/next-step metadata as separate review metadata, not as part of the approvable draft.
+8. Call `worklog_edit_session_log` with the authored sections, then present the exact rendered session log draft as normal chat content with headings and lists, and ask the user whether to edit or approve it. Do not wrap the log in a fenced Markdown/code block or otherwise show raw Markdown source unless the user explicitly asks for raw Markdown. Do not summarize the draft, show only its ID, or send a final task-completion response before showing the draft. Treat attention/status/next-step metadata as separate review metadata, not as part of the approvable draft.
 9. Use `worklog_edit_session_log` for requested edits. Prefer the flexible `sections` object for custom formats. Editing a draft does not require explicit user approval; ask for explicit approval only before finalizing the session log.
 10. Call `worklog_approve_session_log` only after explicit user approval. Pass `confirmed_by_user: true`, the user's exact `confirmation_quote`, and the reviewed `session_log_id`.
 
@@ -136,7 +136,7 @@ Do not carry over routine session details such as exact commands, exhaustive fil
 
 3. Before storing the draft, run a reflection pass: check that useful carry-forward facts from the previous approved project log are preserved, stale facts are updated or removed, and every supplied approved session log has been considered.
 4. Call `worklog_draft_project_log` again with the same `session_log_id` or `session_log_ids` plus the authored `sections` or `fields`. Worklog stores this as a draft; it should not mechanically generate the rollup.
-5. Show the exact rendered project log draft and ask whether the user wants edits or approval. Treat pending-update/status metadata as separate review metadata, not as part of the approvable draft.
+5. Present the exact rendered project log draft as normal chat content with headings and lists, and ask whether the user wants edits or approval. Do not wrap the log in a fenced Markdown/code block or otherwise show raw Markdown source unless the user explicitly asks for raw Markdown. Treat pending-update/status metadata as separate review metadata, not as part of the approvable draft.
 6. Use `worklog_edit_project_log` for requested edits. Prefer the flexible `sections` object for custom formats. Editing a draft does not require explicit user approval; ask for explicit approval only before finalizing the project log.
 7. Call `worklog_approve_project_log` only after explicit user approval. Pass `confirmed_by_user: true` and the user's exact `confirmation_quote`.
 
@@ -147,7 +147,7 @@ For shared projects, only a project approver should approve the project log. If 
 - Never claim a session log or project log is approved until the approval tool succeeds.
 - Do not infer approval from silence or general positivity.
 - Do not require explicit user approval for ordinary draft mutation. Explicit approval is required for approving/finalizing logs, template changes, sharing changes, and publishing boundaries.
-- When a substantive Worklog-tracked task is complete and a session log is drafted or edited, display the exact rendered session-log draft text in the same response that reports task completion, then ask for review or explicit approval. Do not wait for a later user turn. A draft ID alone is not sufficient review.
+- When a substantive Worklog-tracked task is complete and a session log is drafted or edited, present the exact rendered session-log draft as normal chat content in the same response that reports task completion, then ask for review or explicit approval. Do not wait for a later user turn. Do not wrap the log in a fenced Markdown/code block or otherwise show raw Markdown source unless the user explicitly asks for raw Markdown. A draft ID alone is not sufficient review.
 - Treat resume context as reviewed Worklog state, not as raw event history.
 - Keep source events local and out of chat unless the user asks to inspect them.
 - The user's template is authoritative. Preserve their section names and format.

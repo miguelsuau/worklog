@@ -112,6 +112,12 @@ DEFAULT_PROJECT_TEMPLATE = {
     "sections": [],
 }
 
+RENDERED_LOG_PRESENTATION_GUIDANCE = (
+    "Present the rendered {log_type} as normal chat content with headings and lists. "
+    "Do not wrap it in a fenced Markdown/code block or otherwise show raw Markdown source "
+    "unless the user explicitly asks for raw Markdown."
+)
+
 TEMPLATE_AUTHORING_GUIDANCE = {
     "purpose": "The LLM proposes project-specific Worklog templates in conversation; Worklog stores only the user-approved result.",
     "required_template_fields": ["name", "description", "sections"],
@@ -770,6 +776,7 @@ class Server:
             "session_log": draft,
             "source_events": public_source_events(events),
             "session_log_text": session_log_text,
+            "presentation_guidance": rendered_log_presentation_guidance("session log"),
             "review_metadata_text": review_metadata_text,
             "reflection_checklist": session_log_reflection_checklist(),
             "next_required_action": "llm_author_session_log_then_call_worklog_edit_session_log",
@@ -782,12 +789,13 @@ class Server:
         result = {
             "session_log": log,
             "session_log_text": session_log_text,
+            "presentation_guidance": rendered_log_presentation_guidance("session log"),
             "review_metadata_text": render_session_log_review_metadata(log),
             "text": session_log_text,
         }
         if log["status"] == "draft":
             result["next_required_action"] = (
-                "show_session_log_text_in_same_completion_response_then_ask_for_review_or_explicit_approval"
+                "present_rendered_session_log_in_chat_not_code_block_then_ask_for_review_or_explicit_approval"
             )
         return result
 
@@ -812,10 +820,11 @@ class Server:
         return {
             "session_log": log,
             "session_log_text": session_log_text,
+            "presentation_guidance": rendered_log_presentation_guidance("session log"),
             "review_metadata_text": render_session_log_review_metadata(log),
             "reflection_checklist": session_log_reflection_checklist(),
             "next_required_action": (
-                "show_session_log_text_in_same_completion_response_then_ask_for_review_or_explicit_approval"
+                "present_rendered_session_log_in_chat_not_code_block_then_ask_for_review_or_explicit_approval"
             ),
             "text": session_log_text,
         }
@@ -897,6 +906,7 @@ class Server:
         return {
             "project_log": draft,
             "project_log_text": render_project_log(draft),
+            "presentation_guidance": rendered_log_presentation_guidance("project log"),
             "reflection_checklist": project_log_reflection_checklist(),
             "text": render_project_log(draft),
         }
@@ -918,6 +928,7 @@ class Server:
             "project_log": log,
             "pending_project_updates": pending,
             "project_log_text": project_log_text,
+            "presentation_guidance": rendered_log_presentation_guidance("project log"),
             "review_metadata_text": review_metadata_text,
             "reflection_checklist": project_log_reflection_checklist(),
             "text": project_log_text,
@@ -936,6 +947,7 @@ class Server:
         return {
             "project_log": log,
             "project_log_text": render_project_log(log),
+            "presentation_guidance": rendered_log_presentation_guidance("project log"),
             "reflection_checklist": project_log_reflection_checklist(),
             "text": render_project_log(log),
         }
@@ -1419,6 +1431,10 @@ def normalize_sharing_config(
 
 def backend_requires_location(backend: str) -> bool:
     return backend in {"shared_directory", "git_repo"}
+
+
+def rendered_log_presentation_guidance(log_type: str) -> str:
+    return RENDERED_LOG_PRESENTATION_GUIDANCE.format(log_type=log_type)
 
 
 def backend_for_sharing_provider(sharing_provider: str | None, requested_backend: str) -> str:
