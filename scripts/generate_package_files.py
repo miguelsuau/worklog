@@ -121,18 +121,6 @@ def generated_manifests(metadata: dict[str, Any]) -> dict[Path, str]:
         "skills": ["./skills/worklog"],
         "mcpServers": "./.mcp.json",
     }
-    claude_code_plugin = {
-        "name": name,
-        "displayName": metadata["display_name"],
-        "description": descriptions["claude"],
-        "version": version,
-        "author": author,
-        "homepage": metadata["homepage"],
-        "repository": metadata["repository"],
-        "license": metadata["license"],
-        "keywords": metadata["keywords"],
-        "mcpServers": "./.mcp.json",
-    }
     codex_plugin = {
         "name": name,
         "version": version,
@@ -191,7 +179,6 @@ def generated_manifests(metadata: dict[str, Any]) -> dict[Path, str]:
     }
     return {
         ROOT / "packages" / "claude" / ".claude-plugin" / "plugin.json": json_text(claude_plugin),
-        ROOT / "packages" / "claude-code" / ".claude-plugin" / "plugin.json": json_text(claude_code_plugin),
         ROOT / "packages" / "codex" / ".codex-plugin" / "plugin.json": json_text(codex_plugin),
         ROOT / ".agents" / "plugins" / "marketplace.json": json_text(codex_marketplace),
         ROOT / ".claude-plugin" / "marketplace.json": json_text(claude_marketplace),
@@ -229,7 +216,6 @@ def generated_mcp_configs() -> dict[Path, str]:
     }
     return {
         ROOT / "packages" / "claude" / ".mcp.json": json_text(claude_mcp),
-        ROOT / "packages" / "claude-code" / ".mcp.json": json_text(claude_mcp),
         ROOT / "packages" / "codex" / ".mcp.json": json_text(codex_mcp),
     }
 

@@ -102,14 +102,18 @@ files = [
     repo / ".claude-plugin" / "marketplace.json",
     repo / ".agents" / "plugins" / "marketplace.json",
     repo / "packages" / "claude" / ".claude-plugin" / "plugin.json",
-    repo / "packages" / "claude-code" / ".claude-plugin" / "plugin.json",
     repo / "packages" / "codex" / ".codex-plugin" / "plugin.json",
     repo / "packages" / "claude" / ".mcp.json",
-    repo / "packages" / "claude-code" / ".mcp.json",
     repo / "packages" / "codex" / ".mcp.json",
 ]
 for file in files:
     json.loads(file.read_text())
+for forbidden in [
+    repo / "packages" / "claude-code" / ".claude-plugin" / "plugin.json",
+    repo / "packages" / "claude-code" / ".mcp.json",
+]:
+    if forbidden.exists():
+        raise SystemExit(f"{forbidden} must not exist in the standalone Claude Code skill package.")
 source = repo / "src" / "worklog" / "mcp_server.py"
 for package in [repo / "packages" / "claude", repo / "packages" / "claude-code", repo / "packages" / "codex"]:
     vendored = package / "lib" / "worklog" / "mcp_server.py"
