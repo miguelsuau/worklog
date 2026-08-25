@@ -244,7 +244,10 @@ class Server:
                 "The user chooses the session-log and project-log "
                 "templates at project setup. Project-log rollups are LLM-authored from "
                 "approved session logs and approved project state; Worklog stores the "
-                "draft but does not mechanically decide where facts belong. When starting a project, ask about the "
+                "draft but does not mechanically decide where facts belong. Rollups "
+                "should merge and prune durable resume state; recency is not "
+                "importance, and the newest session log should not dominate merely "
+                "because it is newest. When starting a project, ask about the "
                 "nature of the work first, then have the LLM propose a structure; "
                 "accept custom structures. Resume context is generated from an approved "
                 "project log plus recent approved session logs. For review flows, show "
@@ -3556,6 +3559,10 @@ def render_project_rollup_authoring(
         "",
         "Worklog does not generate project-log rollups automatically. The assistant should write the project-log draft from the approved source material, then call `worklog_draft_project_log` again with `sections` or `fields`.",
         "",
+        "Project logs are durable resume state, not session recaps, PR changelogs, validation receipts, or audit trails. Treat approved session logs as evidence to distill from, not content to copy. Recency is not importance; a newly approved session log may produce a small project-log change or no change at all.",
+        "",
+        "For each candidate item, ask whether a future agent would act differently because it is in the project log. If not, keep it in the session log only. Prefer replacing stale state with the current final fact over appending the story of how the state changed.",
+        "",
         "Project log sections to author:",
     ]
     for section in template_sections(project_template):
@@ -3597,9 +3604,11 @@ def render_project_rollup_authoring(
             "",
             "Next:",
             "- Author a coherent project-log draft in the user's project-log format.",
+            "- Start from the previous approved project log as the base, then merge in only durable deltas from approved session logs.",
             "- Place facts only in sections where they semantically belong.",
-            "- Preserve useful previous project-log content and update it with the approved session log(s).",
-            "- Run a reflection pass before review: check that relevant carry-forward facts are preserved, obsolete facts are removed or updated, and every pending approved session log has been considered.",
+            "- Replace superseded theories, plans, and status with the current truth instead of carrying both old and new versions.",
+            "- Omit PR mechanics, exact commands, validation receipts, local branch state, and detailed file lists unless they materially affect future resumption.",
+            "- Run a reflection pass before review: check that relevant carry-forward facts are preserved, obsolete facts are removed or updated, every pending approved session log has been considered, and the newest session log has not dominated the project log by mere recency.",
             "- Then call `worklog_draft_project_log` with `project_id`, the same `session_log_ids` if applicable, and the authored `sections` or `fields`.",
         ]
     )
@@ -3611,8 +3620,10 @@ def project_rollup_reflection_checklist() -> list[str]:
         "Compare the authored project-log draft against the previous approved project log.",
         "Preserve durable carry-forward facts that remain relevant for future resume context.",
         "Update or remove stale facts instead of copying the previous project log mechanically.",
-        "Check every approved source session log supplied for durable outcomes, decisions, risks, and next actions.",
-        "Keep routine session evidence in session logs unless it materially affects future project resumption.",
+        "Check every approved source session log supplied for durable outcomes, decisions, risks, and next actions, but do not give the newest session log special weight merely because it is newest.",
+        "For each new or changed item, ask whether a future agent would act differently because it is in the project log; otherwise keep it in the session log only.",
+        "Replace superseded theories, plans, and status with the current truth instead of carrying both old and new versions.",
+        "Keep routine session evidence, PR mechanics, exact commands, validation receipts, local branch state, and detailed file lists in session logs unless they materially affect future project resumption.",
     ]
 
 
@@ -3620,6 +3631,9 @@ def project_log_reflection_checklist() -> list[str]:
     return [
         "Review the exact project-log draft before requesting approval.",
         "Check that project-log sections contain durable resume state rather than audit-trail detail.",
+        "Check for recency bias: the latest session log should not be overrepresented unless it changed durable project state.",
+        "Remove PR mechanics, exact commands, validation receipts, local branch state, and detailed file lists unless they materially affect future resumption.",
+        "Replace superseded theories, plans, and status with the current truth instead of carrying both old and new versions.",
         "Move review-loop instructions such as approving the draft out of project-log sections and into review metadata.",
         "Confirm relevant carry-forward facts are preserved and stale facts are updated or removed.",
         "Confirm pending approved session logs are either incorporated into the draft or surfaced as unresolved review metadata.",
@@ -3737,6 +3751,7 @@ def render_resume(
             "",
             "- Treat this as reviewed Worklog state.",
             "- Do not treat raw source events as approved project-log state.",
+            "- Treat recent session logs as supporting evidence, not as automatic project state; favor the approved project log unless pending updates contain durable changes.",
         ]
     )
     return "\n".join(output)
