@@ -76,6 +76,8 @@ Worklog currently supports Claude Cowork, Claude Code, and Codex. Regular
 Claude Chat is not supported in this beta because Worklog depends on a local
 MCP server, and Chat does not currently expose that server to the skill.
 
+### Claude
+
 The easiest install path is to ask Claude Cowork to add Worklog from the public
 Worklog Beta plugin marketplace. Open Claude Desktop, switch to Cowork, and
 paste:
@@ -106,6 +108,13 @@ marketplace. Use the full GitHub URL so the command works across Claude builds:
 /reload-plugins
 ```
 
+If `/worklog` says `Unknown skill: worklog` in Claude Chat, switch to Cowork or
+Claude Code. If it happens in Cowork or Claude Code, update the Worklog Beta
+marketplace, make sure Worklog is installed and enabled in that host, then
+restart Claude Desktop or run `/reload-plugins` in Claude Code.
+
+### Codex
+
 Codex installs from the same public marketplace:
 
 ```bash
@@ -119,11 +128,6 @@ After installation, start a new Codex task and use either:
 $worklog
 /worklog
 ```
-
-If `/worklog` says `Unknown skill: worklog` in Claude Chat, switch to Cowork or
-Claude Code. If it happens in Cowork or Claude Code, update the Worklog Beta
-marketplace, make sure Worklog is installed and enabled in that host, then
-restart Claude Desktop or run `/reload-plugins` in Claude Code.
 
 ## Repository Layout
 
