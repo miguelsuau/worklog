@@ -118,7 +118,7 @@ def generated_manifests(metadata: dict[str, Any]) -> dict[Path, str]:
         "repository": metadata["repository"],
         "license": metadata["license"],
         "keywords": metadata["keywords"],
-        "skills": "./skills/",
+        "skills": ["./skills/worklog"],
         "mcpServers": "./.mcp.json",
     }
     claude_code_plugin = {
