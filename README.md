@@ -153,8 +153,6 @@ packages/claude/
 
 packages/claude-code/
   SKILL.md
-  .claude-plugin/plugin.json
-  .mcp.json
   scripts/worklog_mcp_server.py
   lib/worklog/
 
@@ -168,8 +166,12 @@ packages/codex/
 ```
 
 The package folders differ internally because Claude Cowork expects an
-installable plugin package, Claude Code's direct installer uses a single root
-skill, and Codex expects plugin-bundled skills under `skills/<name>/`.
+installable plugin package, Claude Code's direct installer uses a clean
+standalone root skill, and Codex expects plugin-bundled skills under
+`skills/<name>/`. The standalone Claude Code skill package intentionally omits
+`.claude-plugin/plugin.json`; putting plugin metadata under
+`~/.claude/skills/worklog` can make Claude register both `worklog` and
+`worklog:worklog`.
 
 Codex uses `$` mentions for skills, so the Codex package includes a bundled
 `worklog` skill in addition to the MCP server. The package uses Codex's unified
