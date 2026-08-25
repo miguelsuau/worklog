@@ -122,9 +122,9 @@ For shared projects, approved session logs may be published even when the curren
 ## Project Log Review
 
 1. After a session log is approved, call `worklog_draft_project_log` with the approved `session_log_id` or the project `project_id` and no sections. With a shared project, passing `project_id` lets Worklog surface all pending approved session logs that are not yet incorporated.
-2. As the assistant, author the project-log rollup yourself. Use judgment to preserve useful previous project state, incorporate the new approved session log, and place facts only in sections where they semantically belong.
+2. As the assistant, author the project-log rollup yourself. Treat it as a merge-and-prune pass over the previous approved project log plus approved session logs: preserve durable existing state, add only durable changes, replace superseded facts with the current truth, and remove stale or over-specific details. Do not give the newest session log special weight just because it is newest.
 
-Project logs are resume state, not an audit trail. Prefer durable facts future work needs:
+Project logs are resume state, not session recaps, PR changelogs, validation receipts, or audit trails. A project-log item belongs only when a future agent would act differently because it is there. Prefer durable facts future work needs:
 
 - current behavior or project state
 - durable decisions and rationale
@@ -132,10 +132,12 @@ Project logs are resume state, not an audit trail. Prefer durable facts future w
 - risks, constraints, or unresolved unknowns
 - next actions
 
-Do not carry over routine session details such as exact commands, exhaustive file lists, validation receipts, intermediate status updates, or conversational Q&A unless they materially affect future project decisions or resumption. Keep those details in the session log.
+When a session log contains a false start, discarded plan, or superseded diagnosis, record only the final current state unless the discarded idea is likely to be repeated and future agents need the warning. Prefer one durable current fact over a narrative of attempts.
+
+Do not carry over routine session details such as exact commands, branch names, PR mechanics, exact commit hashes, exhaustive file lists, validation receipts, intermediate status updates, local worktree state, or conversational Q&A unless they materially affect future project decisions or resumption. Keep those details in the session log.
 Do not include review-loop mechanics such as "review this draft" or "approve this project log" inside project-log sections. Those belong in review metadata or the surrounding chat, not in the approvable project log.
 
-3. Before storing the draft, run a reflection pass: check that useful carry-forward facts from the previous approved project log are preserved, stale facts are updated or removed, and every supplied approved session log has been considered.
+3. Before storing the draft, run a reflection pass: check that useful carry-forward facts from the previous approved project log are preserved, stale facts are updated or removed, every supplied approved session log has been considered, and the newest session log has not dominated the project log by mere recency. For each new or changed item, ask: "Would a future agent need this to resume or make a better decision?" If not, leave it in the session log only.
 4. Call `worklog_draft_project_log` again with the same `session_log_id` or `session_log_ids` plus the authored `sections` or `fields`. Worklog stores this as a draft; it should not mechanically generate the rollup.
 5. Present the exact rendered project log draft as normal chat content with headings and lists, and ask whether the user wants edits or approval. Do not wrap the log in a fenced Markdown/code block or otherwise show raw Markdown source unless the user explicitly asks for raw Markdown. Treat pending-update/status metadata as separate review metadata, not as part of the approvable draft.
 6. Use `worklog_edit_project_log` for requested edits. Prefer the flexible `sections` object for custom formats. Editing a draft does not require explicit user approval; ask for explicit approval only before finalizing the project log.
@@ -158,5 +160,6 @@ For shared projects, only a project approver should approve the project log. If 
 - Session-log content should be authored by the assistant from the bounded source-event slice and the user's template; Worklog's deterministic draft seed should handle IDs, timestamps, template attachment, source-event range metadata, and rendering, not semantic classification.
 - Never create or set up a new project before checking whether the work belongs to an existing Worklog project.
 - Project-log rollups must be authored by the assistant from reviewed Worklog state. Do not expect Worklog to automatically classify or copy session-log content into project-log sections.
-- Project logs should preserve resumable durable state; session logs should preserve session-level evidence, validation details, and execution receipts.
+- Project-log rollups should merge and prune. Recency is not importance; a newly approved session log may produce a small project-log change or no change at all.
+- Project logs should preserve resumable durable state; session logs should preserve session-level evidence, validation details, execution receipts, false starts, and audit trail.
 - If a prompt starts with `/worklog` or `\worklog`, do not treat it as a shell command or path. Treat it as an explicit request to use Worklog.
