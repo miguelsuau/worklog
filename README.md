@@ -101,8 +101,7 @@ After installation, start a new Cowork task and use:
 
 ### Claude Code standalone
 
-Claude Code plugin installs may show Worklog as `/worklog:worklog`. For a bare
-local Claude Code install without the plugin manager, run:
+For a local Claude Code install without the plugin manager, run:
 
 ```bash
 ./install-claude.sh

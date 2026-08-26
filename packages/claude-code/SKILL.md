@@ -29,7 +29,6 @@ Treat any of these as an explicit request to use Worklog:
 - `$worklog`
 - `@worklog`
 - `/worklog`
-- `/worklog:worklog`
 - `\worklog`
 - "use Worklog"
 - "load Worklog"
