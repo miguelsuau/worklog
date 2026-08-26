@@ -27,14 +27,17 @@ Treat any of these as an explicit request to use Worklog:
 
 {{HOST_INVOCATION_NOTE}}
 
-When the invocation includes a task after the command, strip the invocation marker mentally and do the user's task, but use Worklog first:
+When the invocation includes a substantive task after the command, strip the invocation marker mentally and make the work Worklog-tracked before doing the task:
 
 1. Call `worklog_list_projects`.
-2. If an existing project clearly matches the task, use that exact `project_id`.
+2. If an existing complete project clearly matches the task, use that exact `project_id`.
 3. If the project is unclear, ask the user which project this belongs to before creating a new one.
-4. If a matching project has approved context, call `worklog_resume_context` and use it before doing the work.
-5. Complete the user's requested work normally.
-6. At the end of the work session, run the Session Log Review workflow only when the conversation produced substantive project work or the user explicitly asks to log it. Do not prompt for session-log approval when the only activity was Worklog project setup/configuration, template or sharing configuration, status inspection, resume-context loading, or log review/approval.
+4. If a matching project exists but setup is incomplete, finish the Project Setup workflow before doing substantive task work.
+5. If no plausible matching project exists, start the Project Setup workflow before doing substantive task work.
+6. If a matching project has approved context, call `worklog_resume_context` and use it before doing the work.
+7. Do not complete the substantive task first and retroactively set up Worklog unless the user explicitly says to proceed without Worklog tracking.
+8. Once a complete project is selected, complete the user's requested work normally.
+9. At the end of the work session, run the Session Log Review workflow only when the conversation produced substantive project work or the user explicitly asks to log it. Do not prompt for session-log approval when the only activity was Worklog project setup/configuration, template or sharing configuration, status inspection, resume-context loading, or log review/approval.
 
 If the user invokes Worklog only to inspect or manage logs, follow the relevant setup, resume, session-log, or project-log workflow instead of doing unrelated work.
 
@@ -145,6 +148,9 @@ For shared projects, only a project approver should approve the project log. If 
 - Treat resume context as reviewed Worklog state, not as raw event history.
 - Keep source events local and out of chat unless the user asks to inspect them.
 - The user's template is authoritative. Preserve their section names and format.
+- A Worklog-tracked task requires a selected complete project before substantive work begins. Setup is complete only after templates and sharing mode are selected and the first project log is approved.
+- Listing projects or starting project setup is not enough to make work Worklog-tracked.
+- If no complete Worklog project exists for a Worklog-invoked task, substantive task work must wait until Project Setup is complete unless the user explicitly chooses to continue without Worklog tracking.
 - If no user-approved template is configured, do not draft logs yet. Start project setup first.
 - Do not ask the user to approve a session log when the only completed work was Worklog setup/configuration, status inspection, resume-context loading, or log review/approval.
 - Do not draft a new session log from an entire source session when an approved session log already covers earlier events in the same source session and project; continue from the prior approved log's source-event boundary unless the user explicitly requests a different range.
