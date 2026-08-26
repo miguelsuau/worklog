@@ -99,25 +99,16 @@ After installation, start a new Cowork task and use:
 /worklog
 ```
 
-The Claude plugin ships Worklog as a flat command at `commands/worklog.md`, so
-Claude Code presents the clean `/worklog` handle instead of the namespaced
-plugin-skill form `/worklog:worklog`.
-
 ### Claude Code standalone
 
-For a bare `/worklog` handle in Claude Code, install the standalone skill
-package instead of the marketplace plugin:
+For a local Claude Code install without the plugin manager, run:
 
 ```bash
 ./install-claude.sh
 ```
 
-The standalone installer places a root skill at `~/.claude/skills/worklog`
-without plugin metadata, which lets Claude Code expose it as `/worklog`.
-
 If Claude Code still shows `/worklog:worklog`, update Worklog to a version that
-ships the Claude command package, then run `/reload-plugins` or restart Claude
-Code.
+ships the command package, then run `/reload-plugins` or restart Claude Code.
 
 ### Codex
 
