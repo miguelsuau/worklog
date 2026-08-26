@@ -107,9 +107,6 @@ For a local Claude Code install without the plugin manager, run:
 ./install-claude.sh
 ```
 
-If Claude Code still shows `/worklog:worklog`, update Worklog to a version that
-ships the command package, then run `/reload-plugins` or restart Claude Code.
-
 ### Codex
 
 Paste this into Codex:
