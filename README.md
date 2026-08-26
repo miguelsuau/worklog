@@ -90,13 +90,13 @@ Use Claude Desktop's Customize > Plugins flow:
 1. Add that repository as a plugin marketplace if it is not already listed.
 2. Install Worklog from the Worklog Beta marketplace.
 3. Ask me before changing settings or granting permissions.
-4. When finished, tell me to start a new Cowork task and type /worklog:worklog.
+4. When finished, tell me to start a new Cowork task and type /worklog.
 ```
 
 After installation, start a new Cowork task and use:
 
 ```text
-/worklog:worklog
+/worklog
 ```
 
 ### Claude Code standalone
