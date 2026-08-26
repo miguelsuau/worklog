@@ -99,20 +99,6 @@ After installation, start a new Cowork task and use:
 /worklog
 ```
 
-Claude Code uses its own plugin manager, but it installs from the same
-marketplace. Use the full GitHub URL so the command works across Claude builds:
-
-```text
-/plugin marketplace add https://github.com/miguelsuau/worklog.git
-/plugin install worklog@worklog-beta
-/reload-plugins
-```
-
-If `/worklog` says `Unknown skill: worklog` in Claude Chat, switch to Cowork or
-Claude Code. If it happens in Cowork or Claude Code, update the Worklog Beta
-marketplace, make sure Worklog is installed and enabled in that host, then
-restart Claude Desktop or run `/reload-plugins` in Claude Code.
-
 ### Codex
 
 Paste this into Codex:
