@@ -108,7 +108,15 @@ files = [
 ]
 for file in files:
     json.loads(file.read_text())
+claude_plugin = json.loads((repo / "packages" / "claude" / ".claude-plugin" / "plugin.json").read_text())
+if claude_plugin.get("commands") != "./commands/":
+    raise SystemExit("Claude plugin must expose Worklog through ./commands/ for the bare /worklog handle.")
+if "skills" in claude_plugin:
+    raise SystemExit("Claude plugin must not declare skills; use commands/worklog.md to avoid /worklog:worklog.")
+if not (repo / "packages" / "claude" / "commands" / "worklog.md").exists():
+    raise SystemExit("Claude plugin is missing commands/worklog.md.")
 for forbidden in [
+    repo / "packages" / "claude" / "skills" / "worklog" / "SKILL.md",
     repo / "packages" / "claude-code" / ".claude-plugin" / "plugin.json",
     repo / "packages" / "claude-code" / ".mcp.json",
 ]:

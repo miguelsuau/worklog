@@ -34,7 +34,7 @@ Treat any of these as an explicit request to use Worklog:
 - "load Worklog"
 - "track this in Worklog"
 
-Claude can invoke this skill with `/worklog`. `$worklog`, `@worklog`, and `\worklog` are command-like conventions from other agent hosts; if the host passes any of them through in the prompt, treat it exactly like an explicit Worklog invocation.
+Claude can invoke this command with `/worklog`. `$worklog`, `@worklog`, and `\worklog` are command-like conventions from other agent hosts; if the host passes any of them through in the prompt, treat it exactly like an explicit Worklog invocation.
 
 When the invocation includes a task after the command, strip the invocation marker mentally and do the user's task, but use Worklog first:
 

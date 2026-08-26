@@ -2,7 +2,7 @@
   "name": "worklog",
   "displayName": "Worklog",
   "description": "Turn work sessions into reviewed session logs and project logs.",
-  "version": "0.1.0-beta.6",
+  "version": "0.1.0-beta.7",
   "author": {
     "name": "Miguel Suau"
   },
@@ -15,8 +15,6 @@
     "session-log",
     "mcp"
   ],
-  "skills": [
-    "./skills/worklog"
-  ],
+  "commands": "./commands/",
   "mcpServers": "./.mcp.json"
 }

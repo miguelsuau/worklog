@@ -76,6 +76,8 @@ Worklog currently supports Claude Cowork, Claude Code, and Codex. Regular
 Claude Chat is not supported in this beta because Worklog depends on a local
 MCP server, and Chat does not currently expose that server to the skill.
 
+### Claude plugin
+
 The easiest install path is to ask Claude Cowork to add Worklog from the public
 Worklog Beta plugin marketplace. Open Claude Desktop, switch to Cowork, and
 paste:
@@ -97,20 +99,28 @@ After installation, start a new Cowork task and use:
 /worklog
 ```
 
-Claude Code uses its own plugin manager, but it installs from the same
-marketplace. Use the full GitHub URL so the command works across Claude builds:
+### Claude Code standalone
 
-```text
-/plugin marketplace add https://github.com/miguelsuau/worklog.git
-/plugin install worklog@worklog-beta
-/reload-plugins
-```
-
-Codex installs from the same public marketplace:
+For a local Claude Code install without the plugin manager, run:
 
 ```bash
+./install-claude.sh
+```
+
+### Codex
+
+Paste this into Codex:
+
+```text
+Please install Worklog from this public GitHub plugin marketplace:
+https://github.com/miguelsuau/worklog.git
+
+Run:
 codex plugin marketplace add https://github.com/miguelsuau/worklog.git
 codex plugin add worklog@worklog-beta
+
+Ask me before changing settings or granting permissions. When finished, tell me
+to start a new Codex task and type $worklog.
 ```
 
 After installation, start a new Codex task and use either:
@@ -119,11 +129,6 @@ After installation, start a new Codex task and use either:
 $worklog
 /worklog
 ```
-
-If `/worklog` says `Unknown skill: worklog` in Claude Chat, switch to Cowork or
-Claude Code. If it happens in Cowork or Claude Code, update the Worklog Beta
-marketplace, make sure Worklog is installed and enabled in that host, then
-restart Claude Desktop or run `/reload-plugins` in Claude Code.
 
 ## Repository Layout
 
@@ -161,7 +166,7 @@ The host-specific packages are:
 packages/claude/
   .claude-plugin/plugin.json
   .mcp.json
-  skills/worklog/SKILL.md
+  commands/worklog.md
   scripts/worklog_mcp_server.py
   lib/worklog/
 
@@ -179,13 +184,12 @@ packages/codex/
   lib/worklog/
 ```
 
-The package folders differ internally because Claude Cowork expects an
-installable plugin package, Claude Code's direct installer uses a clean
-standalone root skill, and Codex expects plugin-bundled skills under
-`skills/<name>/`. The standalone Claude Code skill package intentionally omits
+The package folders differ internally because Claude's plugin install can expose
+flat command files, Claude Code's direct installer uses a clean standalone root
+skill, and Codex expects plugin-bundled skills under `skills/<name>/`. The
+standalone Claude Code skill package intentionally omits
 `.claude-plugin/plugin.json`; putting plugin metadata under
-`~/.claude/skills/worklog` can make Claude register both `worklog` and
-`worklog:worklog`.
+`~/.claude/skills/worklog` can make Claude register duplicate Worklog entries.
 
 Codex uses `$` mentions for skills, so the Codex package includes a bundled
 `worklog` skill in addition to the MCP server. The package uses Codex's unified
