@@ -109,14 +109,16 @@ files = [
 for file in files:
     json.loads(file.read_text())
 claude_plugin = json.loads((repo / "packages" / "claude" / ".claude-plugin" / "plugin.json").read_text())
-if claude_plugin.get("commands") != "./commands/":
-    raise SystemExit("Claude plugin must expose Worklog through ./commands/ for the bare /worklog handle.")
-if "skills" in claude_plugin:
-    raise SystemExit("Claude plugin must not declare skills; use commands/worklog.md to avoid /worklog:worklog.")
-if not (repo / "packages" / "claude" / "commands" / "worklog.md").exists():
-    raise SystemExit("Claude plugin is missing commands/worklog.md.")
+if claude_plugin.get("skills") != ["./skills/worklog"]:
+    raise SystemExit("Claude plugin must declare the Worklog skill path explicitly.")
+if "commands" in claude_plugin:
+    raise SystemExit("Claude plugin should not declare commands; plugin commands are namespaced skills in Claude Code.")
+claude_skill = repo / "packages" / "claude" / "skills" / "worklog" / "SKILL.md"
+if not claude_skill.exists():
+    raise SystemExit("Claude plugin is missing skills/worklog/SKILL.md.")
+if (repo / "packages" / "claude" / "commands" / "worklog.md").exists():
+    raise SystemExit("Claude plugin must not ship commands/worklog.md; plugin commands are still namespaced skills.")
 for forbidden in [
-    repo / "packages" / "claude" / "skills" / "worklog" / "SKILL.md",
     repo / "packages" / "claude-code" / ".claude-plugin" / "plugin.json",
     repo / "packages" / "claude-code" / ".mcp.json",
 ]:
