@@ -26,8 +26,9 @@ SKILL_HOSTS = {
         "skill_path": ROOT / "packages" / "claude" / "skills" / "worklog" / "SKILL.md",
         "skill_description": SKILL_DESCRIPTION,
         "invocation_note": (
-            "Claude plugin installs expose this skill under the plugin namespace as "
-            "`/worklog:worklog`. Standalone Claude Code installs can expose `/worklog`. "
+            "Claude Cowork plugin installs expose this skill as `/worklog`. Claude Code "
+            "plugin installs expose it under the plugin namespace as `/worklog:worklog`. "
+            "Standalone Claude Code installs can also expose `/worklog`. "
             "`$worklog`, `@worklog`, and `\\worklog` are command-like conventions from "
             "other agent hosts; if the host passes any of them through in the prompt, "
             "treat it exactly like an explicit Worklog invocation."
