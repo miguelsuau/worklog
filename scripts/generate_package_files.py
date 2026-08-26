@@ -16,16 +16,15 @@ METADATA_PATH = ROOT / "plugin.metadata.json"
 LAUNCHER_PATH = ROOT / "launcher" / "worklog_mcp_server.py"
 PLACEHOLDER = "{{HOST_INVOCATION_NOTE}}"
 CODEX_SKILL_AGENT_PATH = ROOT / "packages" / "codex" / "skills" / "worklog" / "agents" / "openai.yaml"
+SKILL_DESCRIPTION = (
+    "Reviewed project memory for agent work that captures sessions as user-approved "
+    "session logs, rolls them into project logs, and resumes from approved context."
+)
 
 SKILL_HOSTS = {
     "claude": {
         "skill_path": ROOT / "packages" / "claude" / "skills" / "worklog" / "SKILL.md",
-        "skill_description": (
-            "Use Worklog when the user invokes /worklog:worklog, asks to use Worklog, or wants "
-            "to track, resume, or review project work; create user-approved templates, "
-            "capture session logs, author project-log rollups, and generate resume "
-            "context using the installed Worklog MCP tools."
-        ),
+        "skill_description": SKILL_DESCRIPTION,
         "invocation_note": (
             "Claude plugin installs expose this skill under the plugin namespace as "
             "`/worklog:worklog`. Standalone Claude Code installs can expose `/worklog`. "
@@ -36,12 +35,7 @@ SKILL_HOSTS = {
     },
     "claude_code": {
         "skill_path": ROOT / "packages" / "claude-code" / "SKILL.md",
-        "skill_description": (
-            "Use Worklog when the user invokes /worklog, asks to use Worklog, or wants "
-            "to track, resume, or review project work; create user-approved templates, "
-            "capture session logs, author project-log rollups, and generate resume "
-            "context using the installed Worklog MCP tools."
-        ),
+        "skill_description": SKILL_DESCRIPTION,
         "invocation_note": (
             "Claude can invoke this skill with `/worklog`. `$worklog`, `@worklog`, and "
             "`\\worklog` are command-like conventions from other agent hosts; if the "
@@ -51,10 +45,7 @@ SKILL_HOSTS = {
     },
     "codex": {
         "skill_path": ROOT / "packages" / "codex" / "skills" / "worklog" / "SKILL.md",
-        "skill_description": (
-            "Track work sessions, review session logs, update project logs, and "
-            "resume projects with approved context."
-        ),
+        "skill_description": SKILL_DESCRIPTION,
         "invocation_note": (
             "Codex can invoke this skill with `$worklog` or `/worklog`. ChatGPT plugin "
             "surfaces support `@worklog`. `\\worklog` is a command-like text "
