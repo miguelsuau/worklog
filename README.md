@@ -122,6 +122,20 @@ codex plugin marketplace add https://github.com/miguelsuau/worklog.git
 codex plugin add worklog@worklog-beta
 ```
 
+If you are already in Codex, you can paste this instead:
+
+```text
+Please install Worklog from this public GitHub plugin marketplace:
+https://github.com/miguelsuau/worklog.git
+
+Run:
+codex plugin marketplace add https://github.com/miguelsuau/worklog.git
+codex plugin add worklog@worklog-beta
+
+Ask me before changing settings or granting permissions. When finished, tell me
+to start a new Codex task and type $worklog.
+```
+
 After installation, start a new Codex task and use either:
 
 ```text
