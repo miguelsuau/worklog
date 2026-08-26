@@ -115,14 +115,7 @@ restart Claude Desktop or run `/reload-plugins` in Claude Code.
 
 ### Codex
 
-Codex installs from the same public marketplace:
-
-```bash
-codex plugin marketplace add https://github.com/miguelsuau/worklog.git
-codex plugin add worklog@worklog-beta
-```
-
-If you are already in Codex, you can paste this instead:
+Paste this into Codex:
 
 ```text
 Please install Worklog from this public GitHub plugin marketplace:
