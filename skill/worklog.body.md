@@ -37,7 +37,7 @@ When the invocation includes a substantive task after the command, strip the inv
 6. If a matching project has approved context, call `worklog_resume_context` and use it before doing the work.
 7. Do not complete the substantive task first and retroactively set up Worklog unless the user explicitly says to proceed without Worklog tracking.
 8. Once a complete project is selected, complete the user's requested work normally.
-9. At the end of the work session, run the Session Log Review workflow only when the conversation produced substantive project work or the user explicitly asks to log it. Do not prompt for session-log approval when the only activity was Worklog project setup/configuration, template or sharing configuration, status inspection, resume-context loading, or log review/approval.
+9. Run the Session Log Review workflow only when a timing gate is true: the tracked task is clearly complete, the user explicitly asks to log or review the session, or the agent must stop and preserve reviewed state. If the task may reasonably continue, ask the user before drafting a session log instead of treating a substep or idle moment as session completion. Do not prompt for session-log approval when the only activity was Worklog project setup/configuration, template or sharing configuration, status inspection, resume-context loading, or log review/approval.
 
 If the user invokes Worklog only to inspect or manage logs, follow the relevant setup, resume, session-log, or project-log workflow instead of doing unrelated work.
 
@@ -81,10 +81,13 @@ When adding members to an existing shared project, call `worklog_update_project_
 
 Use these tools:
 
+- `worklog_discover_shared_project` to inspect a shared Worklog project before first-time join/import. Discovery must be non-mutating: read the shared manifest, templates, permissions, index, and approved artifact counts; show project identity, local conflicts, warnings, and the exact join arguments; then ask for explicit confirmation before configuring the local project.
 - `worklog_configure_project_sharing` to run the shared-destination workflow: get provider recommendations first, then path or connector-target recommendations for the selected provider, then create/join a shared project after the user confirms both.
 - `worklog_show_project_sharing` to inspect policy, backend status, and pending project-log updates.
 - `worklog_update_project_members` to add, replace, or remove contributors, project approvers, and maintainers after setup; for shared projects, use it to coordinate backend permission application too.
-- `worklog_sync_project` to pull approved member artifacts and publish local approved artifacts. Use `dry_run: true` before risky backend changes.
+- `worklog_sync_project` to pull approved member artifacts and publish local approved artifacts after a shared project is configured locally. Use `direction: "pull"` for later updates from a joined/shared project, and use `dry_run: true` before risky backend changes. Pulls must not import drafts; they should report no updates, pulled approved artifacts, shared setting changes, conflicts, and pending project-log updates distinctly.
+
+When the user wants to open, fetch, or make a local copy of a Worklog that someone else shared, treat that as first-time join/import. Call `worklog_discover_shared_project` first if a shared root or project directory is available. If the user confirms the preview, call `worklog_configure_project_sharing` with `mode: "join"` and the confirmed join arguments. If discovery finds multiple projects under a shared root, ask the user which one to join. For connector-backed systems, first use the provider connector/API/browser tooling to fetch or materialize the approved Worklog artifacts; then discover or join the materialized shared project.
 
 If a contributor approves a session log but lacks project-log approval permission, do not update the project log. The approved session log becomes a pending project-log update. A project approver should later draft and approve a project-log rollup.
 
@@ -98,11 +101,13 @@ If a contributor approves a session log but lacks project-log approval permissio
 
 ## Session Log Review
 
+Start this workflow only when one of these timing gates is true: the tracked task is clearly complete, the user explicitly asks to log or review the session, or the agent must stop and preserve reviewed state. If the user may reasonably intend to continue the task, ask whether to draft the session log now instead of drafting it proactively. When calling `worklog_draft_session_log`, pass `review_reason` as `task_complete`, `user_requested_log_review`, or `agent_must_stop` to match the timing gate.
+
 1. Capture or import source material with `worklog_capture_session`, `worklog_import_events`, or `worklog_add_event` when needed. `worklog_capture_session` can auto-capture supported host transcripts, including Claude Code and Codex JSONL files, when the host writes them locally.
-2. If auto-capture reports that no supported transcript is available, do not stop the review flow. Use `worklog_add_event` to add a concise assistant-authored source event summarizing the work that happened in the current conversation, then call `worklog_draft_session_log` with `capture: false` and the returned `session_id`.
+2. If auto-capture reports that no supported transcript is available, do not stop the review flow. Use `worklog_add_event` to add a concise assistant-authored source event summarizing the work that happened in the current conversation, then call `worklog_draft_session_log` with `capture: false`, the returned `session_id`, and the matching `review_reason`.
 3. Session logs should cover a bounded slice of source events. By default, `worklog_draft_session_log` selects only new source events since the latest approved session log for the same source session and project. Use `from_event_id`, `after_event_id`, or `to_event_id` only when the user intentionally wants a different range.
 4. If project templates are missing or the user wants to change the format, run the Project Setup workflow first.
-5. Call `worklog_draft_session_log` to create a source-bounded draft seed. Worklog returns the bounded source-event slice as private authoring context; do not paste raw source events into chat unless the user asks to inspect them.
+5. Call `worklog_draft_session_log` with the matching `review_reason` to create a source-bounded draft seed. Worklog returns the bounded source-event slice as private authoring context; do not paste raw source events into chat unless the user asks to inspect them.
 6. As the assistant, author the session log sections from the bounded source-event slice and the user's approved session-log template.
 7. Run a reflection pass against the bounded source-event slice before asking for approval: check that important outcomes, decisions, validation, open questions, and next actions are represented in the user's template sections without exposing raw source events.
 8. Call `worklog_edit_session_log` with the authored sections, then present the exact rendered session log draft as normal chat content with headings and lists, and ask the user whether to edit or approve it. Do not wrap the log in a fenced Markdown/code block or otherwise show raw Markdown source unless the user explicitly asks for raw Markdown. Do not summarize the draft, show only its ID, or send a final task-completion response before showing the draft. Treat attention/status/next-step metadata as separate review metadata, not as part of the approvable draft.
@@ -144,6 +149,9 @@ For shared projects, only a project approver should approve the project log. If 
 - Never claim a session log or project log is approved until the approval tool succeeds.
 - Do not infer approval from silence or general positivity.
 - Do not require explicit user approval for ordinary draft mutation. Explicit approval is required for approving/finalizing logs, template changes, sharing changes, and publishing boundaries.
+- Do not draft or print session logs as intermediate progress. Draft a session log only when the tracked task is clearly complete, the user explicitly asks to log or review the session, or the agent must stop and preserve reviewed state.
+- If there is reasonable ambiguity about whether the user intends to continue the tracked task, ask before drafting a session log. Do not treat a completed substep, a status update, or an idle turn as session completion.
+- Every `worklog_draft_session_log` call must include a `review_reason` matching the timing gate: `task_complete`, `user_requested_log_review`, or `agent_must_stop`.
 - When a substantive Worklog-tracked task is complete and a session log is drafted or edited, present the exact rendered session-log draft as normal chat content in the same response that reports task completion, then ask for review or explicit approval. Do not wait for a later user turn. Do not wrap the log in a fenced Markdown/code block or otherwise show raw Markdown source unless the user explicitly asks for raw Markdown. A draft ID alone is not sufficient review.
 - Treat resume context as reviewed Worklog state, not as raw event history.
 - Keep source events local and out of chat unless the user asks to inspect them.

@@ -40,6 +40,12 @@ Worklog is built around four core concepts:
 
 Worklog does not ship predefined legal, medical, engineering, or research templates. The assistant proposes a structure from the nature of the project, then stores only the user-approved templates.
 
+Session logs are drafted at real review boundaries, not as intermediate
+progress updates. The assistant should draft one only when the tracked task is
+clearly complete, the user explicitly asks to log or review the session, or the
+agent must stop and preserve reviewed state. If the task may reasonably
+continue, the assistant should ask before drafting.
+
 ## Sharing
 
 Worklog can be used for local-only projects or shared projects. The sharing
@@ -57,6 +63,15 @@ For shared projects, the assistant should guide setup in stages:
 4. Suggest provider-specific paths, repositories, or connector targets.
 5. Configure the project only after the user confirms the provider and
    location or connector target.
+
+To join a Worklog project that someone else shared, inspect it first with
+`worklog_discover_shared_project`. Discovery is non-mutating: it reads the
+shared manifest, templates, permissions, index, and approved log counts, then
+reports local conflicts and the exact join arguments. After the user confirms,
+call `worklog_configure_project_sharing` with `mode: "join"` to materialize the
+local project settings and pull approved artifacts. After a project has been
+joined, use `worklog_sync_project` with `direction: "pull"` to pull later
+approved updates. Draft logs are never imported or pulled from shared storage.
 
 Worklog also separates project roles:
 
