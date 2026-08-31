@@ -40,16 +40,39 @@ python3 -m py_compile \
 python3 - <<'PY'
 import os
 import sys
+import tempfile
 from pathlib import Path
 
 repo = Path(os.environ["WORKLOG_REPO_ROOT"])
 sys.path.insert(0, str(repo / "src"))
 
 from worklog.mcp_server import (  # noqa: E402
+    SESSION_LOG_REVIEW_REASONS,
+    Server,
+    UserError,
     project_log_approval_blockers,
     project_log_attention,
+    require_session_log_review_reason,
     render_project_log_review_metadata,
+    schemas,
 )
+
+
+draft_session_schema = next(item for item in schemas() if item["name"] == "worklog_draft_session_log")
+draft_session_input_schema = draft_session_schema["inputSchema"]
+if "review_reason" not in draft_session_input_schema.get("required", []):
+    raise SystemExit("worklog_draft_session_log must require review_reason.")
+if draft_session_input_schema["properties"]["review_reason"].get("enum") != sorted(SESSION_LOG_REVIEW_REASONS):
+    raise SystemExit("worklog_draft_session_log review_reason enum is out of sync.")
+if require_session_log_review_reason({"review_reason": "task_complete"}) != "task_complete":
+    raise SystemExit("Expected task_complete review_reason to pass.")
+try:
+    require_session_log_review_reason({})
+except UserError as exc:
+    if "ask the user before drafting" not in str(exc):
+        raise SystemExit("Missing review_reason error should explain the timing gate.")
+else:
+    raise SystemExit("Expected missing review_reason to block session-log drafting.")
 
 
 def project_log(next_actions):
@@ -89,6 +112,173 @@ if project_log_approval_blockers(warned):
 clean = project_log(["Verify live Worklog MCP responses in a fresh or reloaded task."])
 if project_log_attention(clean):
     raise SystemExit("Durable next actions should not trigger project-log review boilerplate attention.")
+
+
+SMOKE_TEMPLATE = {
+    "version": 1,
+    "sections": [
+        {"key": "summary", "title": "Summary", "kind": "text"},
+        {"key": "next_actions", "title": "Next Actions", "kind": "list"},
+    ],
+}
+
+
+def smoke_server(store: Path) -> Server:
+    os.environ["WORKLOG_STORE"] = str(store)
+    return Server()
+
+
+def smoke_configure_project(server: Server, project_id: str, approver: str) -> None:
+    server.set_project_templates(
+        {
+            "project_id": project_id,
+            "project_nature": "shared implementation smoke test",
+            "session_log_template": SMOKE_TEMPLATE,
+            "project_log_template": SMOKE_TEMPLATE,
+            "confirmed_by_user": True,
+            "confirmation_quote": "approved",
+        }
+    )
+    server.update_project_members(
+        {
+            "project_id": project_id,
+            "actor": approver,
+            "operation": "merge",
+            "contributors": [approver],
+            "project_approvers": [approver],
+            "maintainers": [approver],
+            "confirmed_by_user": True,
+            "confirmation_quote": "approved",
+        }
+    )
+
+
+def smoke_approve_project_log(server: Server, project_id: str, actor: str, summary: str) -> None:
+    draft = server.draft_project_log(
+        {
+            "project_id": project_id,
+            "sections": {"summary": summary, "next_actions": ["continue implementation"]},
+        }
+    )
+    server.approve_project_log(
+        {
+            "project_log_id": draft["project_log"]["id"],
+            "approved_by": actor,
+            "confirmed_by_user": True,
+            "confirmation_quote": "approved",
+        }
+    )
+
+
+def smoke_approve_session_log(server: Server, project_id: str, actor: str, text: str, session_id: str) -> None:
+    added = server.add_event(
+        {
+            "project_id": project_id,
+            "session_id": session_id,
+            "text": text,
+            "speaker": actor,
+            "kind": "note",
+        }
+    )
+    draft = server.draft_session_log(
+        {
+            "project_id": project_id,
+            "session_id": added["session"]["id"],
+            "capture": False,
+            "review_reason": "task_complete",
+        }
+    )
+    edited = server.edit_session_log(
+        {
+            "session_log_id": draft["session_log"]["id"],
+            "sections": {"summary": text, "next_actions": ["pull the next update"]},
+        }
+    )
+    server.approve_session_log(
+        {
+            "session_log_id": edited["session_log"]["id"],
+            "author": actor,
+            "approved_by": actor,
+            "confirmed_by_user": True,
+            "confirmation_quote": "approved",
+        }
+    )
+
+
+with tempfile.TemporaryDirectory(prefix="worklog-shared-join-") as temp_name:
+    temp = Path(temp_name)
+    project_id = "shared_join_smoke"
+    author = smoke_server(temp / "author-store")
+    smoke_configure_project(author, project_id, "Author")
+    smoke_approve_project_log(author, project_id, "Author", "Initial shared project log.")
+    smoke_approve_session_log(author, project_id, "Author", "Initial approved shared session.", "session-one")
+    shared_root = temp / "shared"
+    author.configure_project_sharing(
+        {
+            "project_id": project_id,
+            "mode": "create",
+            "sharing_provider": "local_folder",
+            "root": str(shared_root),
+            "actor": "Author",
+            "confirmed_by_user": True,
+            "confirmation_quote": "approved",
+        }
+    )
+    pushed = author.sync_project({"project_id": project_id, "direction": "push"})
+    if not any(item["type"] == "session_log" for item in pushed["published"]):
+        raise SystemExit("Expected initial approved session log to publish.")
+    if not any(item["type"] == "project_log" for item in pushed["published"]):
+        raise SystemExit("Expected initial approved project log to publish.")
+
+    joiner = smoke_server(temp / "join-store")
+    discovered = joiner.discover_shared_project(
+        {
+            "sharing_provider": "local_folder",
+            "root": str(shared_root),
+            "project_id": project_id,
+            "actor": "Joiner",
+        }
+    )
+    if discovered["artifact_counts"]["approved_session_logs"] != 1:
+        raise SystemExit("Expected discovery to count one approved session log.")
+    if discovered["artifact_counts"]["approved_project_logs"] != 1:
+        raise SystemExit("Expected discovery to count one approved project log.")
+    if not discovered["latest_project_log"]["available"]:
+        raise SystemExit("Expected discovery to summarize the latest project log.")
+
+    joined = joiner.configure_project_sharing(
+        {
+            **discovered["join_arguments"],
+            "actor": "Joiner",
+            "confirmed_by_user": True,
+            "confirmation_quote": "approved",
+        }
+    )
+    if joined["setup_state"]["status"] != "complete":
+        raise SystemExit("Expected join/import to leave local setup complete.")
+    backend_permissions = joined["project_sharing"].get("backend_permissions") or {}
+    if backend_permissions.get("permission_status") == "pending_backend_verification":
+        raise SystemExit("Join/import must not leave backend permissions pending.")
+    permission_plan = backend_permissions.get("last_permission_plan") or {}
+    if permission_plan.get("required") or permission_plan.get("actions"):
+        raise SystemExit("Join/import must not create backend ACL actions for existing shared members.")
+    if not any(item["type"] == "session_log" for item in joined["setup"]["pulled"]):
+        raise SystemExit("Expected join/import to pull approved session logs.")
+    if not any(item["type"] in {"project_log", "current_project_log"} for item in joined["setup"]["pulled"]):
+        raise SystemExit("Expected join/import to pull approved project logs.")
+
+    smoke_approve_session_log(author, project_id, "Author", "Second approved shared session.", "session-two")
+    dry = joiner.sync_project({"project_id": project_id, "direction": "pull", "dry_run": True})
+    if dry["pull_summary"]["pulled_session_logs"] < 1:
+        raise SystemExit("Expected dry-run pull to report the new approved session log.")
+    if not any(item["status"] == "would_pull" for item in dry["pulled"]):
+        raise SystemExit("Expected dry-run pull to report would_pull.")
+    actual = joiner.sync_project({"project_id": project_id, "direction": "pull"})
+    if actual["pull_summary"]["pulled_session_logs"] < 1:
+        raise SystemExit("Expected pull to import the new approved session log.")
+    second = joiner.sync_project({"project_id": project_id, "direction": "pull", "dry_run": True})
+    if second["pull_summary"]["pulled_session_logs"] != 0:
+        raise SystemExit("Expected second dry-run pull to report no new session logs.")
 PY
 
 python3 - <<'PY'

@@ -43,6 +43,11 @@ PROJECT_LOG_REVIEW_BOILERPLATE_EXACT = {
     "review this project log draft and approve it",
     "approve this project log draft",
 }
+SESSION_LOG_REVIEW_REASONS = {
+    "task_complete": "the tracked task is clearly complete",
+    "user_requested_log_review": "the user explicitly asked to log or review the session",
+    "agent_must_stop": "the agent must stop and preserve reviewed state",
+}
 SHARING_PROVIDERS: dict[str, dict[str, Any]] = {
     "google_drive": {
         "backend": "shared_directory",
@@ -173,6 +178,7 @@ class Server:
             "worklog_recommend_templates": self.recommend_templates,
             "worklog_set_project_templates": self.set_project_templates,
             "worklog_show_project_templates": self.show_project_templates,
+            "worklog_discover_shared_project": self.discover_shared_project,
             "worklog_configure_project_sharing": self.configure_project_sharing,
             "worklog_show_project_sharing": self.show_project_sharing,
             "worklog_update_project_members": self.update_project_members,
@@ -394,6 +400,41 @@ class Server:
         attach_project_setup_next_step(result, settings)
         return result
 
+    def discover_shared_project(self, args: dict[str, Any]) -> dict[str, Any]:
+        backend_name = clean_optional(args.get("backend")) or "shared_directory"
+        if backend_name not in SHARING_BACKENDS:
+            raise UserError(f"Unsupported sharing backend `{backend_name}`.")
+        sharing_provider = sharing_provider_key(args.get("sharing_provider"))
+        effective_backend = backend_for_sharing_provider(sharing_provider, backend_name)
+        if effective_backend not in {"shared_directory", "git_repo"}:
+            return shared_project_connector_discovery_guidance(
+                effective_backend,
+                sharing_provider,
+                connector_target_from_args(args),
+            )
+        project_id = clean_optional(args.get("project_id"))
+        previews = discover_file_shared_projects(
+            self.db,
+            args,
+            backend=effective_backend,
+            sharing_provider=sharing_provider,
+            requested_project_id=project_id,
+        )
+        if len(previews) > 1:
+            return {
+                "backend": effective_backend,
+                "sharing_provider": sharing_provider,
+                "shared_projects": previews,
+                "next_required_action": "ask_user_to_choose_one_shared_project_then_call_worklog_discover_shared_project_or_worklog_configure_project_sharing",
+                "text": render_shared_project_options(effective_backend, sharing_provider, previews),
+            }
+        preview = previews[0]
+        return {
+            **preview,
+            "next_required_action": "ask_user_to_confirm_join_then_call_worklog_configure_project_sharing_with_mode_join",
+            "text": render_shared_project_discovery(preview),
+        }
+
     def configure_project_sharing(self, args: dict[str, Any]) -> dict[str, Any]:
         project_id = clean_required(args, "project_id")
         backend_name = clean_optional(args.get("backend")) or "shared_directory"
@@ -402,11 +443,13 @@ class Server:
         mode = clean_optional(args.get("mode")) or "create"
         if mode not in {"create", "join"}:
             raise UserError("mode must be `create` or `join`.")
+        if mode == "join":
+            args = normalize_join_location_args(args)
         actor = actor_from_args(args)
         sharing_provider = sharing_provider_key(args.get("sharing_provider"))
         effective_backend = backend_for_sharing_provider(sharing_provider, backend_name)
         if effective_backend == "connector_payload" and not sharing_provider:
-            permissions = normalize_permission_policy(args.get("permissions"), actor=actor)
+            permissions = sharing_permissions_from_args(args, actor=actor, mode=mode)
             guidance = sharing_provider_selection_guidance(project_id, effective_backend)
             return {
                 "project_id": project_id,
@@ -422,7 +465,7 @@ class Server:
         if effective_backend == "connector_payload" and (
             not has_connector_target(args) or args.get("confirmed_by_user") is not True
         ):
-            permissions = normalize_permission_policy(args.get("permissions"), actor=actor)
+            permissions = sharing_permissions_from_args(args, actor=actor, mode=mode)
             provider_setup = setup_sharing_provider(project_id, effective_backend, sharing_provider, args)
             guidance = connector_target_guidance(project_id, sharing_provider, provider_setup, connector_target_from_args(args))
             return {
@@ -438,7 +481,7 @@ class Server:
                 "text": render_connector_target_guidance(project_id, sharing_provider, guidance, permissions),
             }
         if backend_requires_location(effective_backend):
-            permissions = normalize_permission_policy(args.get("permissions"), actor=actor)
+            permissions = sharing_permissions_from_args(args, actor=actor, mode=mode)
             if not sharing_provider:
                 guidance = sharing_provider_selection_guidance(project_id, backend_name)
                 shared_location = shared_location_from_args(args)
@@ -470,7 +513,31 @@ class Server:
                     "next_required_action": "ask_user_to_choose_shared_location_then_confirm_sharing_setup",
                     "text": render_shared_location_guidance(project_id, effective_backend, sharing_provider, guidance, permissions),
                 }
-            if sharing_provider_requires_cloud_verification(sharing_provider):
+            if mode == "join" and args.get("confirmed_by_user") is not True:
+                previews = discover_file_shared_projects(
+                    self.db,
+                    args,
+                    backend=effective_backend,
+                    sharing_provider=sharing_provider,
+                    requested_project_id=project_id,
+                )
+                if len(previews) != 1:
+                    return {
+                        "project_id": project_id,
+                        "backend": effective_backend,
+                        "sharing_provider": sharing_provider,
+                        "shared_projects": previews,
+                        "next_required_action": "ask_user_to_choose_one_shared_project_then_call_worklog_configure_project_sharing",
+                        "text": render_shared_project_options(effective_backend, sharing_provider, previews),
+                    }
+                preview = previews[0]
+                return {
+                    **preview,
+                    "sharing_setup_stage": "preview_join",
+                    "next_required_action": "ask_user_to_confirm_join_then_call_worklog_configure_project_sharing_with_mode_join",
+                    "text": render_shared_project_discovery(preview),
+                }
+            if mode != "join" and sharing_provider_requires_cloud_verification(sharing_provider):
                 provider_setup = setup_sharing_provider(project_id, effective_backend, sharing_provider, args)
                 if not provider_setup.get("provider_connection_verified"):
                     shared_location = shared_location_from_args(args)
@@ -501,7 +568,7 @@ class Server:
                 actor=actor,
             )
             permission_verification = backend_permission_verification_evidence(args, sharing_provider, permission_plan)
-            if permission_plan["required"] and not permission_verification["backend_permissions_verified"]:
+            if mode != "join" and permission_plan["required"] and not permission_verification["backend_permissions_verified"]:
                 return {
                     "project_id": project_id,
                     "backend": effective_backend,
@@ -524,14 +591,32 @@ class Server:
         require_confirmation(args, "configure project sharing")
         existing = self.db.project_settings(project_id)
         sharing = normalize_sharing_config(args, project_id=project_id, actor=actor, backend=effective_backend, mode=mode)
-        permissions = normalize_permission_policy(args.get("permissions"), actor=actor)
-        permission_plan = backend_permission_plan(
-            project_id,
-            effective_backend,
-            sharing_provider,
-            shared_location_from_args(args),
-            permissions,
-            actor=actor,
+        permissions = sharing_permissions_from_args(args, actor=actor, mode=mode)
+        join_settings_patch: dict[str, Any] = {}
+        if mode == "join" and effective_backend in {"shared_directory", "git_repo"}:
+            project_dir = sharing_backend(sharing).project_dir(project_id)  # type: ignore[attr-defined]
+            join_settings_patch = shared_project_settings_patch(project_dir, requested_project_id=project_id)
+            if join_settings_patch.get("permissions"):
+                permissions = normalize_permission_policy(join_settings_patch["permissions"])
+        shared_location = shared_location_from_args(args)
+        permission_plan = (
+            join_backend_permission_plan(
+                project_id,
+                effective_backend,
+                sharing_provider,
+                shared_location,
+                permissions,
+                actor=actor,
+            )
+            if mode == "join"
+            else backend_permission_plan(
+                project_id,
+                effective_backend,
+                sharing_provider,
+                shared_location,
+                permissions,
+                actor=actor,
+            )
         )
         permission_verification = backend_permission_verification_evidence(args, sharing_provider, permission_plan)
         settings = dict(existing)
@@ -552,13 +637,39 @@ class Server:
                 "sharing_confirmation_quote": str(args.get("confirmation_quote")),
             }
         )
+        settings.update(join_settings_patch)
+        settings.update(
+            {
+                "id": project_id,
+                "project_id": project_id,
+                "sharing": sharing,
+                "permissions": permissions,
+                "shared_project_provenance": shared_project_provenance(sharing, join_settings_patch)
+                if mode == "join"
+                else existing.get("shared_project_provenance"),
+            }
+        )
         settings["setup_state"] = project_setup_state(self.db, settings)
         backend = sharing_backend(sharing)
         setup = backend.configure_project(project_id, settings, mode=mode, dry_run=bool(args.get("dry_run", False)))
         if not args.get("dry_run", False):
             self.db.write("project_settings", project_id, settings)
             if mode == "join":
-                setup["pulled"] = backend.pull(self.db, project_id, dry_run=False).get("pulled", [])
+                pulled = backend.pull(self.db, project_id, dry_run=False)
+                setup["pulled"] = pulled.get("pulled", [])
+                setup["checked"] = pulled.get("checked", [])
+                setup["conflicts"] = pulled.get("conflicts", [])
+                settings = self.db.project_settings(project_id)
+                settings["sync_state"] = {
+                    "last_sync_at": now(),
+                    "last_sync_direction": "pull",
+                    "last_sync_dry_run": False,
+                    "last_sync_pulled": len(pulled.get("pulled", [])),
+                    "last_sync_published": 0,
+                    "last_sync_conflicts": len(pulled.get("conflicts", [])),
+                }
+                settings["setup_state"] = project_setup_state(self.db, settings)
+                self.db.write("project_settings", project_id, settings)
         result = {
             "project_sharing": settings,
             "setup": setup,
@@ -677,13 +788,19 @@ class Server:
             "dry_run": dry_run,
             "pulled": [],
             "published": [],
+            "checked": [],
             "conflicts": [],
+            "pull_summary": {},
             "backend_status": backend.status(project_id),
         }
         if direction in {"pull", "both"}:
             pulled = backend.pull(self.db, project_id, dry_run=dry_run)
             result["pulled"].extend(pulled.get("pulled", []))
+            result["checked"].extend(pulled.get("checked", []))
             result["conflicts"].extend(pulled.get("conflicts", []))
+            result["pull_summary"] = pulled.get("summary", {})
+            if pulled.get("remote_index"):
+                result["remote_index"] = pulled["remote_index"]
         if direction in {"push", "both"}:
             published = backend.push(self.db, project_id, dry_run=dry_run)
             result["published"].extend(published.get("published", []))
@@ -755,6 +872,8 @@ class Server:
         }
 
     def draft_session_log(self, args: dict[str, Any]) -> dict[str, Any]:
+        review_reason = require_session_log_review_reason(args)
+        review_reason_detail = clean_optional(args.get("review_reason_detail"))
         session_id = clean_optional(args.get("session_id"))
         if not session_id and args.get("capture", True):
             try:
@@ -781,6 +900,9 @@ class Server:
                 "to draft a different source-event range."
             )
         draft = make_session_log_from_events(session, templates["session_log_template"], events)
+        draft["review_reason"] = review_reason
+        if review_reason_detail:
+            draft["review_reason_detail"] = review_reason_detail
         self.db.write("session_logs", draft["id"], draft)
         session_log_text = render_session_log(draft)
         review_metadata_text = render_session_log_review_metadata(draft)
@@ -1232,6 +1354,30 @@ class FileSharingBackend(SharingBackend):
             raise UserError(f"Cannot join shared project; `{project_dir}` does not exist.")
         if dry_run:
             result["dry_run"] = True
+            if mode == "join":
+                result["discovery"] = inspect_file_shared_project_dir(
+                    None,
+                    project_dir,
+                    backend=self.name,
+                    sharing_provider=clean_optional(self.config.get("sharing_provider")),
+                    requested_project_id=project_id,
+                )
+            return result
+        if mode == "join":
+            if not os.access(project_dir, os.R_OK):
+                raise UserError(f"Cannot join shared project; `{project_dir}` is not readable.")
+            result["discovery"] = inspect_file_shared_project_dir(
+                None,
+                project_dir,
+                backend=self.name,
+                sharing_provider=clean_optional(self.config.get("sharing_provider")),
+                requested_project_id=project_id,
+            )
+            result["verified"].append("shared project directory is readable")
+            if os.access(project_dir, os.W_OK):
+                result["verified"].append("shared project directory is writable")
+            else:
+                result["attention"] = "Shared project directory is read-only; pull/import works, but publishing local approved artifacts requires write access."
             return result
         ensure_shared_project_dirs(project_dir)
         write_json_if_changed(project_dir / "project.json", shared_project_manifest(project_id, settings))
@@ -1255,8 +1401,21 @@ class FileSharingBackend(SharingBackend):
         project_dir = self.project_dir(project_id)
         if not project_dir.exists():
             raise UserError(f"Shared project directory does not exist: `{project_dir}`.")
+        validate_shared_project_dir(project_dir, requested_project_id=project_id)
         pulled = []
+        checked = []
         conflicts = []
+        summary = {
+            "settings_updates": 0,
+            "settings_unchanged": 0,
+            "remote_approved_session_logs": 0,
+            "remote_approved_project_logs": 0,
+            "pulled_session_logs": 0,
+            "pulled_project_logs": 0,
+            "unchanged_session_logs": 0,
+            "unchanged_project_logs": 0,
+            "conflicts": 0,
+        }
         remote_settings = read_json_optional(project_dir / "templates.json")
         remote_permissions = read_json_optional(project_dir / "permissions.json")
         if remote_settings or remote_permissions:
@@ -1269,9 +1428,22 @@ class FileSharingBackend(SharingBackend):
             if remote_permissions:
                 merged["permissions"] = normalize_permission_policy(remote_permissions)
             preserve_project_settings_fields(merged, local)
-            if not dry_run:
+            changes = project_settings_changes(local, merged)
+            if changes and not dry_run:
                 db.write("project_settings", project_id, merged)
-            pulled.append({"type": "project_settings", "id": project_id})
+            if changes:
+                summary["settings_updates"] += 1
+                pulled.append(
+                    {
+                        "type": "project_settings",
+                        "id": project_id,
+                        "status": "would_update" if dry_run else "updated",
+                        "changes": changes,
+                    }
+                )
+            else:
+                summary["settings_unchanged"] += 1
+                checked.append({"type": "project_settings", "id": project_id, "status": "unchanged"})
         for folder, artifact_type in (
             ("session_logs", "session_log"),
             ("project_logs", "project_log"),
@@ -1279,18 +1451,69 @@ class FileSharingBackend(SharingBackend):
             for path in sorted((project_dir / "approved" / folder).glob("*.json")):
                 artifact = read_json_optional(path)
                 if not artifact:
+                    conflicts.append({"type": artifact_type, "path": str(path), "reason": "shared artifact is not a JSON object"})
                     continue
                 artifact_id = str(artifact.get("id") or path.stem)
+                valid = validate_shared_log_artifact(artifact, artifact_type, project_id=project_id, path=path)
+                if valid:
+                    conflicts.append(valid)
+                    continue
+                summary_key = "remote_approved_session_logs" if artifact_type == "session_log" else "remote_approved_project_logs"
+                summary[summary_key] += 1
                 local_path = db.path(folder, artifact_id)
                 if local_path.exists():
                     local = db.read(folder, artifact_id)
                     if json_fingerprint(local) != json_fingerprint(artifact):
                         conflicts.append({"type": artifact_type, "id": artifact_id, "reason": "local artifact differs from shared artifact"})
+                    else:
+                        unchanged_key = "unchanged_session_logs" if artifact_type == "session_log" else "unchanged_project_logs"
+                        summary[unchanged_key] += 1
                     continue
                 if not dry_run:
                     db.write(folder, artifact_id, artifact)
-                pulled.append({"type": artifact_type, "id": artifact_id, "path": str(path)})
-        return {"pulled": pulled, "conflicts": conflicts}
+                pulled.append(
+                    {
+                        "type": artifact_type,
+                        "id": artifact_id,
+                        "status": "would_pull" if dry_run else "pulled",
+                        "path": str(path),
+                    }
+                )
+                pulled_key = "pulled_session_logs" if artifact_type == "session_log" else "pulled_project_logs"
+                summary[pulled_key] += 1
+        current_project_log = read_json_optional(project_dir / "current_project_log.json")
+        if current_project_log:
+            current_conflict = validate_shared_log_artifact(
+                current_project_log,
+                "project_log",
+                project_id=project_id,
+                path=project_dir / "current_project_log.json",
+            )
+            current_id = str(current_project_log.get("id") or "current_project_log")
+            if current_conflict:
+                conflicts.append(current_conflict)
+            elif not db.path("project_logs", current_id).exists():
+                if not dry_run:
+                    db.write("project_logs", current_id, current_project_log)
+                pulled.append(
+                    {
+                        "type": "current_project_log",
+                        "id": current_id,
+                        "status": "would_pull" if dry_run else "pulled",
+                        "path": str(project_dir / "current_project_log.json"),
+                    }
+                )
+        remote_index = read_json_optional(project_dir / "index.json")
+        if remote_index:
+            checked.append({"type": "index", "id": project_id, "status": "checked", "path": str(project_dir / "index.json")})
+        summary["conflicts"] = len(conflicts)
+        return {
+            "pulled": pulled,
+            "checked": checked,
+            "conflicts": conflicts,
+            "remote_index": remote_index,
+            "summary": summary,
+        }
 
     def push(self, db: Store, project_id: str, *, dry_run: bool) -> dict[str, Any]:
         settings = db.project_settings(project_id)
@@ -1411,6 +1634,438 @@ def sharing_backend(config: dict[str, Any]) -> SharingBackend:
     if backend == "connector_payload":
         return ConnectorPayloadBackend(config)
     raise UserError(f"Unsupported sharing backend `{backend}`.")
+
+
+def sharing_permissions_from_args(args: dict[str, Any], *, actor: str, mode: str) -> dict[str, Any]:
+    if mode == "join":
+        return normalize_permission_policy(args.get("permissions"))
+    return normalize_permission_policy(args.get("permissions"), actor=actor)
+
+
+def normalize_join_location_args(args: dict[str, Any]) -> dict[str, Any]:
+    root = clean_optional(args.get("root"))
+    if not root or clean_optional(args.get("shared_project_dir")):
+        return args
+    root_path = Path(root).expanduser()
+    if not (root_path / "project.json").exists():
+        return args
+    normalized = dict(args)
+    normalized["shared_project_dir"] = root
+    normalized.pop("root", None)
+    return normalized
+
+
+def discover_file_shared_projects(
+    db: Store,
+    args: dict[str, Any],
+    *,
+    backend: str,
+    sharing_provider: str | None,
+    requested_project_id: str | None,
+) -> list[dict[str, Any]]:
+    normalized_args = normalize_join_location_args(args)
+    project_dirs = shared_project_dirs_from_args(normalized_args, requested_project_id=requested_project_id)
+    previews = []
+    errors = []
+    for project_dir in project_dirs:
+        try:
+            previews.append(
+                inspect_file_shared_project_dir(
+                    db,
+                    project_dir,
+                    backend=backend,
+                    sharing_provider=sharing_provider,
+                    requested_project_id=requested_project_id,
+                )
+            )
+        except UserError as exc:
+            if len(project_dirs) == 1:
+                raise
+            errors.append({"shared_project_dir": str(project_dir), "reason": str(exc)})
+    if not previews:
+        if errors:
+            detail = "; ".join(f"{item['shared_project_dir']}: {item['reason']}" for item in errors)
+            raise UserError(f"No valid shared Worklog projects were found. {detail}")
+        raise UserError("No shared Worklog projects were found.")
+    return previews
+
+
+def shared_project_dirs_from_args(args: dict[str, Any], *, requested_project_id: str | None) -> list[Path]:
+    shared_project_dir = clean_optional(args.get("shared_project_dir"))
+    if shared_project_dir:
+        return [Path(shared_project_dir).expanduser()]
+    root = clean_optional(args.get("root"))
+    if not root:
+        raise UserError("Pass `root` or `shared_project_dir` to discover or join a shared Worklog project.")
+    root_path = Path(root).expanduser()
+    if (root_path / "project.json").exists():
+        return [root_path]
+    projects_root = root_path / ".worklog" / "projects"
+    if requested_project_id:
+        return [projects_root / file_token(requested_project_id)]
+    if not projects_root.exists():
+        raise UserError(f"No shared Worklog project directory found under `{projects_root}`.")
+    return [
+        path
+        for path in sorted(projects_root.iterdir())
+        if path.is_dir() and (path / "project.json").exists()
+    ]
+
+
+def inspect_file_shared_project_dir(
+    db: Store | None,
+    project_dir: Path,
+    *,
+    backend: str,
+    sharing_provider: str | None,
+    requested_project_id: str | None,
+) -> dict[str, Any]:
+    manifest = validate_shared_project_dir(project_dir, requested_project_id=requested_project_id)
+    project_id = clean_required(manifest, "project_id")
+    templates = read_json_optional(project_dir / "templates.json")
+    permissions = read_json_optional(project_dir / "permissions.json")
+    index = read_json_optional(project_dir / "index.json")
+    session_artifacts, session_artifact_conflicts = read_shared_log_artifacts(
+        project_dir,
+        "session_logs",
+        "session_log",
+        project_id=project_id,
+    )
+    project_artifacts, project_artifact_conflicts = read_shared_log_artifacts(
+        project_dir,
+        "project_logs",
+        "project_log",
+        project_id=project_id,
+    )
+    current_project_log = read_json_optional(project_dir / "current_project_log.json")
+    current_project_log_conflict = None
+    if current_project_log:
+        current_project_log_conflict = validate_shared_log_artifact(
+            current_project_log,
+            "project_log",
+            project_id=project_id,
+            path=project_dir / "current_project_log.json",
+        )
+    latest_project_log = latest_shared_project_log(
+        [item["artifact"] for item in project_artifacts],
+        current_project_log if not current_project_log_conflict else None,
+    )
+    artifact_conflicts = [
+        *session_artifact_conflicts,
+        *project_artifact_conflicts,
+        *([current_project_log_conflict] if current_project_log_conflict else []),
+    ]
+    settings_patch = shared_project_settings_patch_from_payloads(manifest, templates, permissions)
+    local_state = local_shared_project_state(
+        db,
+        project_id,
+        settings_patch=settings_patch,
+        session_artifacts=session_artifacts,
+        project_artifacts=project_artifacts,
+    )
+    warnings = shared_project_discovery_warnings(
+        project_dir,
+        sharing_provider,
+        templates,
+        permissions,
+        index,
+        artifact_conflicts,
+        local_state,
+    )
+    return {
+        "backend": backend,
+        "sharing_provider": sharing_provider,
+        "shared_location": {"shared_project_dir": str(project_dir)},
+        "shared_project": {
+            "product": manifest.get("product"),
+            "schema": manifest.get("schema"),
+            "project_id": project_id,
+            "project_nature": manifest.get("project_nature"),
+            "publish_policy": manifest.get("publish_policy"),
+            "updated_at": manifest.get("updated_at"),
+        },
+        "project_id": project_id,
+        "project_nature": settings_patch.get("project_nature") or manifest.get("project_nature"),
+        "templates": template_preview(templates),
+        "permissions": normalize_permission_policy(permissions),
+        "artifact_counts": {
+            "approved_session_logs": len(session_artifacts),
+            "approved_project_logs": len(project_artifacts),
+            "invalid_or_unapproved_shared_artifacts": len(artifact_conflicts),
+            "has_current_project_log": current_project_log is not None,
+            "has_index": index is not None,
+        },
+        "latest_project_log": project_log_summary(latest_project_log),
+        "local_state": local_state,
+        "warnings": warnings,
+        "join_arguments": {
+            "project_id": project_id,
+            "backend": backend,
+            "sharing_provider": sharing_provider,
+            "shared_project_dir": str(project_dir),
+            "mode": "join",
+        },
+    }
+
+
+def validate_shared_project_dir(project_dir: Path, *, requested_project_id: str | None = None) -> dict[str, Any]:
+    if not project_dir.exists():
+        raise UserError(f"Shared Worklog project directory does not exist: `{project_dir}`.")
+    if not project_dir.is_dir():
+        raise UserError(f"Shared Worklog project path is not a directory: `{project_dir}`.")
+    manifest = read_json_optional(project_dir / "project.json")
+    if not manifest:
+        raise UserError(f"No Worklog `project.json` manifest found in `{project_dir}`.")
+    if manifest.get("product") != "worklog":
+        raise UserError(f"`{project_dir}` is not a Worklog shared project.")
+    schema_value = manifest.get("schema")
+    try:
+        schema_number = int(schema_value)
+    except (TypeError, ValueError):
+        raise UserError(f"Shared Worklog project has invalid schema `{schema_value}`.")
+    if schema_number != SHARED_LAYOUT_VERSION:
+        raise UserError(f"Unsupported shared Worklog schema `{schema_number}`.")
+    project_id = clean_optional(manifest.get("project_id"))
+    if not project_id:
+        raise UserError("Shared Worklog project manifest is missing `project_id`.")
+    if requested_project_id and project_id != requested_project_id:
+        raise UserError(f"Shared Worklog project id `{project_id}` does not match requested project_id `{requested_project_id}`.")
+    return manifest
+
+
+def read_shared_log_artifacts(
+    project_dir: Path,
+    folder: str,
+    artifact_type: str,
+    *,
+    project_id: str,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    artifacts = []
+    conflicts = []
+    for path in sorted((project_dir / "approved" / folder).glob("*.json")):
+        artifact = read_json_optional(path)
+        if not artifact:
+            conflicts.append({"type": artifact_type, "path": str(path), "reason": "shared artifact is not a JSON object"})
+            continue
+        conflict = validate_shared_log_artifact(artifact, artifact_type, project_id=project_id, path=path)
+        if conflict:
+            conflicts.append(conflict)
+            continue
+        artifacts.append({"id": str(artifact.get("id")), "path": str(path), "artifact": artifact})
+    return artifacts, conflicts
+
+
+def validate_shared_log_artifact(
+    artifact: dict[str, Any],
+    artifact_type: str,
+    *,
+    project_id: str,
+    path: Path,
+) -> dict[str, Any] | None:
+    artifact_id = clean_optional(artifact.get("id")) or path.stem
+    if artifact.get("status") != "approved":
+        return {"type": artifact_type, "id": artifact_id, "path": str(path), "reason": "shared artifact is not approved"}
+    if clean_optional(artifact.get("project_id")) != project_id:
+        return {"type": artifact_type, "id": artifact_id, "path": str(path), "reason": "shared artifact belongs to a different project"}
+    return None
+
+
+def latest_shared_project_log(project_logs: list[dict[str, Any]], current_project_log: dict[str, Any] | None) -> dict[str, Any] | None:
+    candidates = list(project_logs)
+    if current_project_log:
+        candidates.append(current_project_log)
+    if not candidates:
+        return None
+    return max(candidates, key=lambda item: (int(item.get("version", 0)), item.get("approved_at") or item.get("updated_at") or ""))
+
+
+def shared_project_settings_patch(project_dir: Path, *, requested_project_id: str | None) -> dict[str, Any]:
+    manifest = validate_shared_project_dir(project_dir, requested_project_id=requested_project_id)
+    return shared_project_settings_patch_from_payloads(
+        manifest,
+        read_json_optional(project_dir / "templates.json"),
+        read_json_optional(project_dir / "permissions.json"),
+    )
+
+
+def shared_project_settings_patch_from_payloads(
+    manifest: dict[str, Any],
+    templates: dict[str, Any] | None,
+    permissions: dict[str, Any] | None,
+) -> dict[str, Any]:
+    project_id = clean_required(manifest, "project_id")
+    patch: dict[str, Any] = {
+        "id": project_id,
+        "project_id": project_id,
+        "project_nature": clean_optional((templates or {}).get("project_nature")) or clean_optional(manifest.get("project_nature")) or "user-defined",
+        "created_or_updated_at": now(),
+    }
+    if templates:
+        for key in ("session_log_template", "project_log_template"):
+            if isinstance(templates.get(key), dict):
+                fallback = DEFAULT_SESSION_TEMPLATE if key == "session_log_template" else DEFAULT_PROJECT_TEMPLATE
+                patch[key] = normalize_template(templates[key], fallback=fallback)
+    if permissions:
+        patch["permissions"] = normalize_permission_policy(permissions)
+    return patch
+
+
+def local_shared_project_state(
+    db: Store | None,
+    project_id: str,
+    *,
+    settings_patch: dict[str, Any],
+    session_artifacts: list[dict[str, Any]],
+    project_artifacts: list[dict[str, Any]],
+) -> dict[str, Any]:
+    if db is None:
+        return {"available": False}
+    settings_exists = db.path("project_settings", project_id).exists()
+    local_settings = db.project_settings(project_id)
+    local_session_logs = db.session_logs(project_id, status="approved")
+    local_project_logs = approved_project_logs(db, project_id)
+    artifact_conflicts = []
+    for folder, artifact_type, artifacts in (
+        ("session_logs", "session_log", session_artifacts),
+        ("project_logs", "project_log", project_artifacts),
+    ):
+        for item in artifacts:
+            artifact_id = str(item["id"])
+            local_path = db.path(folder, artifact_id)
+            if not local_path.exists():
+                continue
+            local = db.read(folder, artifact_id)
+            if json_fingerprint(local) != json_fingerprint(item["artifact"]):
+                artifact_conflicts.append({"type": artifact_type, "id": artifact_id, "reason": "local artifact differs from shared artifact"})
+    return {
+        "project_settings_exists": settings_exists,
+        "setup_status": project_setup_state(db, local_settings).get("status") if settings_exists else "new_local_project",
+        "approved_session_logs": len(local_session_logs),
+        "approved_project_logs": len(local_project_logs),
+        "settings_changes": project_settings_changes(local_settings, {**local_settings, **settings_patch}),
+        "artifact_conflicts": artifact_conflicts,
+    }
+
+
+def project_settings_changes(current: dict[str, Any], proposed: dict[str, Any]) -> list[str]:
+    changes = []
+    for key in ("project_nature", "session_log_template", "project_log_template", "permissions"):
+        if key not in proposed:
+            continue
+        current_value = current.get(key)
+        proposed_value = proposed.get(key)
+        if isinstance(current_value, dict) and isinstance(proposed_value, dict):
+            if json_fingerprint(current_value) != json_fingerprint(proposed_value):
+                changes.append(key)
+        elif current_value != proposed_value:
+            changes.append(key)
+    return changes
+
+
+def shared_project_discovery_warnings(
+    project_dir: Path,
+    sharing_provider: str | None,
+    templates: dict[str, Any] | None,
+    permissions: dict[str, Any] | None,
+    index: dict[str, Any] | None,
+    artifact_conflicts: list[dict[str, Any]],
+    local_state: dict[str, Any],
+) -> list[str]:
+    warnings = []
+    if not sharing_provider:
+        warnings.append("Choose the sharing provider before finalizing the join/import.")
+    if not templates:
+        warnings.append("Shared templates were not found; the local project may still need template setup.")
+    if not permissions:
+        warnings.append("Shared permissions were not found; Worklog will use the default local policy until permissions are configured.")
+    if not index:
+        warnings.append("Shared index.json was not found; Worklog can still scan approved artifacts directly.")
+    if artifact_conflicts:
+        warnings.append("Some files under the shared approved-artifacts folders are invalid, unapproved, or belong to another project.")
+    if local_state.get("project_settings_exists") and local_state.get("settings_changes"):
+        warnings.append("A local project with this id already exists and shared settings would update local settings.")
+    if local_state.get("artifact_conflicts"):
+        warnings.append("A local project with this id already has approved artifacts that differ from the shared artifacts.")
+    if not os.access(project_dir, os.W_OK):
+        warnings.append("The shared project directory is read-only; pull/import can work, but push/publish requires write access.")
+    return warnings
+
+
+def template_preview(templates: dict[str, Any] | None) -> dict[str, Any]:
+    if not templates:
+        return {"available": False}
+    return {
+        "available": True,
+        "project_nature": templates.get("project_nature"),
+        "session_log_template": template_summary(templates.get("session_log_template")),
+        "project_log_template": template_summary(templates.get("project_log_template")),
+        "updated_at": templates.get("updated_at"),
+    }
+
+
+def template_summary(template: Any) -> dict[str, Any]:
+    if not isinstance(template, dict):
+        return {"available": False}
+    normalized = normalize_template(template, fallback=DEFAULT_SESSION_TEMPLATE)
+    return {
+        "available": True,
+        "name": normalized.get("name"),
+        "sections": [section["key"] for section in template_sections(normalized)],
+    }
+
+
+def project_log_summary(log: dict[str, Any] | None) -> dict[str, Any]:
+    if not log:
+        return {"available": False}
+    return {
+        "available": True,
+        "id": log.get("id"),
+        "title": log.get("title"),
+        "version": log.get("version"),
+        "approved_at": log.get("approved_at"),
+        "approved_by": log.get("approved_by"),
+    }
+
+
+def shared_project_provenance(sharing: dict[str, Any], settings_patch: dict[str, Any]) -> dict[str, Any]:
+    shared_project_dir = clean_optional(sharing.get("shared_project_dir"))
+    root = clean_optional(sharing.get("root"))
+    manifest_fingerprint = ""
+    if shared_project_dir:
+        manifest = read_json_optional(Path(shared_project_dir).expanduser() / "project.json")
+        if manifest:
+            manifest_fingerprint = json_fingerprint(manifest)
+    return {
+        "joined_at": now(),
+        "shared_project_dir": shared_project_dir,
+        "root": root,
+        "sharing_provider": clean_optional(sharing.get("sharing_provider")),
+        "project_id": settings_patch.get("project_id"),
+        "project_manifest_fingerprint": manifest_fingerprint,
+    }
+
+
+def shared_project_connector_discovery_guidance(
+    backend: str,
+    sharing_provider: str | None,
+    connector_target: str | None,
+) -> dict[str, Any]:
+    provider_name = sharing_provider_display_name(sharing_provider or "selected_provider")
+    return {
+        "backend": backend,
+        "sharing_provider": sharing_provider,
+        "connector_target": connector_target,
+        "next_required_action": "use_provider_connector_to_fetch_or_materialize_approved_worklog_artifacts_then_discover_or_join_the_materialized_project",
+        "text": lines(
+            "# Discover Shared Worklog Project",
+            "",
+            f"Connector-backed {provider_name} sharing needs a provider adapter before Worklog can import or pull.",
+            "",
+            "- Use the provider connector, API, or browser tooling to fetch the approved Worklog artifacts.",
+            "- Materialize them into the standard shared Worklog layout, or pass provider-specific payloads through a future connector import adapter.",
+            "- Draft artifacts should remain local and must not be imported as shared state.",
+        ),
+    }
 
 
 def normalize_sharing_config(
@@ -2243,6 +2898,39 @@ def backend_permission_plan(
     }
 
 
+def join_backend_permission_plan(
+    project_id: str,
+    backend: str,
+    sharing_provider: str | None,
+    shared_location: dict[str, str],
+    permissions: dict[str, Any],
+    *,
+    actor: str,
+) -> dict[str, Any]:
+    project_dir = shared_location.get("shared_project_dir") or resulting_project_dir_example(
+        project_id,
+        shared_location.get("root") or "<shared-root>",
+    )
+    return {
+        "required": False,
+        "backend": backend,
+        "sharing_provider": sharing_provider,
+        "capability": "shared_project_access_inherited",
+        "operation": "join",
+        "project_id": project_id,
+        "shared_location": shared_location,
+        "project_dir": project_dir,
+        "members": [],
+        "actions": [],
+        "observed_members": backend_permission_members(permissions, actor=actor),
+        "provider_permission_note": (
+            "Join/import uses the backend access already granted on the shared location. "
+            "Worklog does not apply ACL changes during join; use worklog_update_project_members "
+            "later when changing shared-project membership."
+        ),
+    }
+
+
 def backend_permission_members(permissions: dict[str, Any], *, actor: str) -> list[dict[str, Any]]:
     by_member: dict[str, dict[str, Any]] = {}
     for role_key in ("contributors", "project_approvers", "maintainers"):
@@ -2666,6 +3354,20 @@ def schemas() -> list[dict[str, Any]]:
             ["project_id"],
         ),
         schema(
+            "worklog_discover_shared_project",
+            "Inspect a shared Worklog project without changing local state. Use before first-time join/import to preview project identity, approved artifacts, local conflicts, and the exact join arguments.",
+            {
+                "project_id": {"type": "string"},
+                "backend": {"type": "string", "enum": ["shared_directory", "git_repo", "connector_payload"]},
+                "sharing_provider": {"type": "string"},
+                "root": {"type": "string"},
+                "shared_project_dir": {"type": "string"},
+                "connector": {"type": "string"},
+                "connector_target": {"type": "string"},
+            },
+            [],
+        ),
+        schema(
             "worklog_configure_project_sharing",
             "Configure or join a shared Worklog project. Stores Worklog policy and initializes the selected backend when possible.",
             {
@@ -2767,17 +3469,19 @@ def schemas() -> list[dict[str, Any]]:
         ),
         schema(
             "worklog_draft_session_log",
-            "Create a source-bounded session-log draft seed. Captures the current host transcript first by default when available, continues after the latest approved session log for the same source session/project unless explicit range arguments are provided, and returns the bounded source-event slice as private authoring context for the assistant.",
+            "Create a source-bounded session-log draft seed. Call only when the tracked task is clearly complete, the user explicitly asked to log/review the session, or the agent must stop. Captures the current host transcript first by default when available, continues after the latest approved session log for the same source session/project unless explicit range arguments are provided, and returns the bounded source-event slice as private authoring context for the assistant.",
             {
                 "session_id": {"type": "string"},
                 "project_id": {"type": "string"},
+                "review_reason": {"type": "string", "enum": sorted(SESSION_LOG_REVIEW_REASONS)},
+                "review_reason_detail": {"type": "string"},
                 "capture": {"type": "boolean"},
                 "session_path": {"type": "string"},
                 "from_event_id": {"type": "string"},
                 "after_event_id": {"type": "string"},
                 "to_event_id": {"type": "string"},
             },
-            [],
+            ["review_reason"],
         ),
         schema(
             "worklog_show_session_log",
@@ -3461,6 +4165,13 @@ def render_session_log_review_metadata(log: dict[str, Any]) -> str:
         f"- session_log_id: `{log['id']}`",
         f"- status: `{log['status']}`",
     ]
+    review_reason = clean_optional(log.get("review_reason"))
+    if review_reason:
+        description = SESSION_LOG_REVIEW_REASONS.get(review_reason, review_reason)
+        output.append(f"- review_reason: `{review_reason}` ({description})")
+    review_reason_detail = clean_optional(log.get("review_reason_detail"))
+    if review_reason_detail:
+        output.append(f"- review_reason_detail: {review_reason_detail}")
     attention = session_log_attention(log)
     if attention:
         add_section(output, "Attention", attention)
@@ -3476,6 +4187,22 @@ def session_log_attention(log: dict[str, Any]) -> list[str]:
     if not session_log_has_content(log):
         attention.append("This draft seed has no authored session-log sections yet; the assistant should author and edit it before approval.")
     return attention
+
+
+def require_session_log_review_reason(args: dict[str, Any]) -> str:
+    reason = clean_optional(args.get("review_reason"))
+    if reason in SESSION_LOG_REVIEW_REASONS:
+        return reason
+    options = ", ".join(
+        f"`{key}` ({description})" for key, description in SESSION_LOG_REVIEW_REASONS.items()
+    )
+    raise UserError(
+        "Before drafting a session log, pass `review_reason` as one of: "
+        f"{options}. Draft session logs only when one timing gate is true: "
+        "the tracked task is clearly complete, the user explicitly asked to log or review "
+        "the session, or the agent must stop and preserve reviewed state. If the task may "
+        "reasonably continue, ask the user before drafting."
+    )
 
 
 def public_source_events(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -3495,6 +4222,7 @@ def render_session_log_authoring_next_step() -> str:
     return lines(
         "Next:",
         "- The assistant should author the session log from the bounded source-event slice and the user's session-log template.",
+        "- Continue session-log review only because a timing gate was met: the tracked task is complete, the user explicitly asked to log/review, or the agent must stop.",
         "- Before asking for approval, run a reflection pass against the source-event slice to check for missed outcomes, decisions, validation, open questions, and next actions.",
         "- Keep raw source events out of chat unless the user asks to inspect them.",
         "- Then call `worklog_edit_session_log` with the authored sections.",
@@ -3505,6 +4233,7 @@ def render_session_log_authoring_next_step() -> str:
 def session_log_reflection_checklist() -> list[str]:
     return [
         "Compare the authored session-log sections against the bounded source-event slice.",
+        "Confirm the timing gate is still valid: the tracked task is complete, the user explicitly asked to log/review, or the agent must stop.",
         "Check that important outcomes, decisions, validation, open questions, and next actions are represented in the user's template sections.",
         "Keep routine command details and raw event text out of chat unless the user asks to inspect source events.",
         "Confirm the draft has project_id and enough authored section content before requesting approval.",
@@ -4293,11 +5022,93 @@ def render_sync_result(result: dict[str, Any]) -> str:
         f"- direction: `{result['direction']}`",
         f"- dry_run: `{result['dry_run']}`",
     ]
+    if result.get("pull_summary"):
+        add_section(output, "Pull Summary", result["pull_summary"])
     add_section(output, "Pulled", [sync_item_line(item) for item in result.get("pulled", [])])
+    add_section(output, "Checked", [sync_item_line(item) for item in result.get("checked", [])])
     add_section(output, "Published", [sync_item_line(item) for item in result.get("published", [])])
     add_section(output, "Conflicts", [sync_item_line(item) for item in result.get("conflicts", [])])
+    if result.get("remote_index"):
+        add_section(output, "Remote Index", result["remote_index"])
     add_section(output, "Backend Status", result.get("backend_status") or {})
     output.extend(["", render_pending_project_updates(result.get("pending_project_updates") or [])])
+    return "\n".join(output)
+
+
+def render_shared_project_options(
+    backend: str,
+    sharing_provider: str | None,
+    previews: list[dict[str, Any]],
+) -> str:
+    output = [
+        "# Shared Worklog Projects Found",
+        "",
+        f"- backend: `{backend}`",
+        f"- sharing_provider: `{sharing_provider or ''}`",
+        "",
+        "Choose one shared project before joining/importing.",
+        "",
+    ]
+    for preview in previews:
+        shared_project = preview.get("shared_project") or {}
+        location = preview.get("shared_location") or {}
+        counts = preview.get("artifact_counts") or {}
+        output.append(f"## {shared_project.get('project_id') or preview.get('project_id')}")
+        output.append("")
+        output.append(f"- project_nature: `{preview.get('project_nature') or ''}`")
+        output.append(f"- shared_project_dir: `{location.get('shared_project_dir') or ''}`")
+        output.append(f"- approved_session_logs: {counts.get('approved_session_logs', 0)}")
+        output.append(f"- approved_project_logs: {counts.get('approved_project_logs', 0)}")
+        local_state = preview.get("local_state") if isinstance(preview.get("local_state"), dict) else {}
+        output.append(f"- local_state: `{local_state.get('setup_status') or 'unknown'}`")
+        warnings = preview.get("warnings") or []
+        if warnings:
+            output.append(f"- warnings: {len(warnings)}")
+        output.append("")
+    output.extend(
+        [
+            "## Next",
+            "",
+            "Ask the user which shared Worklog project to join/import.",
+            "Then call `worklog_discover_shared_project` with `shared_project_dir` for a final preview, or call `worklog_configure_project_sharing` with `mode: \"join\"` after explicit confirmation.",
+        ]
+    )
+    return "\n".join(output)
+
+
+def render_shared_project_discovery(preview: dict[str, Any]) -> str:
+    shared_project = preview.get("shared_project") or {}
+    location = preview.get("shared_location") or {}
+    output = [
+        f"# Discover Shared Worklog Project: {preview.get('project_id')}",
+        "",
+        "Worklog inspected the shared project without changing local state.",
+        "",
+        f"- backend: `{preview.get('backend')}`",
+        f"- sharing_provider: `{preview.get('sharing_provider') or ''}`",
+        f"- shared_project_dir: `{location.get('shared_project_dir') or ''}`",
+        f"- project_id: `{preview.get('project_id')}`",
+        f"- project_nature: `{preview.get('project_nature') or ''}`",
+        f"- publish_policy: `{shared_project.get('publish_policy') or ''}`",
+        f"- updated_at: `{shared_project.get('updated_at') or ''}`",
+    ]
+    add_section(output, "Templates", preview.get("templates") or {})
+    add_section(output, "Permissions", preview.get("permissions") or {})
+    add_section(output, "Approved Artifact Counts", preview.get("artifact_counts") or {})
+    add_section(output, "Latest Project Log", preview.get("latest_project_log") or {})
+    add_section(output, "Local State", preview.get("local_state") or {})
+    add_section(output, "Warnings", preview.get("warnings") or [])
+    add_section(output, "Join Arguments", preview.get("join_arguments") or {})
+    output.extend(
+        [
+            "",
+            "## Next",
+            "",
+            "Ask the user to confirm joining/importing this shared Worklog project.",
+            "After explicit confirmation, call `worklog_configure_project_sharing` with these join arguments plus `confirmed_by_user: true` and the user's exact confirmation quote.",
+            "Only approved artifacts will be copied into the local Worklog store; draft logs remain local to their original author.",
+        ]
+    )
     return "\n".join(output)
 
 
