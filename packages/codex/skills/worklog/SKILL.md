@@ -22,6 +22,10 @@ reviewed truth; Worklog state becomes trustworthy only after user approval.
 
 Use Worklog terms consistently: "session log", "project log", "source events", and "resume context".
 
+## Hypothesis Labeling
+
+Session logs and project logs must distinguish facts from hypotheses. Facts are claims grounded in source events, approved Worklog state, validation output, or user-confirmed information. Hypotheses, inferences, assumptions, suspected causes, proposed explanations, and unverified experiment results or insights must be labeled explicitly in the log text. Use labels such as `Hypothesis:`, `Inference:`, `Assumption:`, `Suspected cause:`, or `Unverified result:` when the evidence is not sufficient to state something as fact.
+
 ## Explicit Invocation
 
 Treat any of these as an explicit request to use Worklog:
@@ -117,8 +121,8 @@ Start this workflow only when one of these timing gates is true: the tracked tas
 3. Session logs should cover a bounded slice of source events. By default, `worklog_draft_session_log` selects only new source events since the latest approved session log for the same source session and project. Use `from_event_id`, `after_event_id`, or `to_event_id` only when the user intentionally wants a different range.
 4. If project templates are missing or the user wants to change the format, run the Project Setup workflow first.
 5. Call `worklog_draft_session_log` with the matching `review_reason` to create a source-bounded draft seed. Worklog returns the bounded source-event slice as private authoring context; do not paste raw source events into chat unless the user asks to inspect them.
-6. As the assistant, author the session log sections from the bounded source-event slice and the user's approved session-log template.
-7. Run a reflection pass against the bounded source-event slice before asking for approval: check that important outcomes, decisions, validation, open questions, and next actions are represented in the user's template sections without exposing raw source events.
+6. As the assistant, author the session log sections from the bounded source-event slice and the user's approved session-log template. Ground factual claims in the bounded source events, approved Worklog state, validation output, or user-confirmed facts. Label hypotheses, inferences, assumptions, suspected causes, proposed explanations, and unverified results or insights explicitly in the log text.
+7. Run a reflection pass against the bounded source-event slice before asking for approval: check that important outcomes, decisions, validation, open questions, and next actions are represented in the user's template sections without exposing raw source events, and check that non-factual claims are labeled.
 8. Call `worklog_edit_session_log` with the authored sections, then present the exact rendered session log draft as normal chat content with headings and lists, and ask the user whether to edit or approve it. Do not wrap the log in a fenced Markdown/code block or otherwise show raw Markdown source unless the user explicitly asks for raw Markdown. Do not summarize the draft, show only its ID, or send a final task-completion response before showing the draft. Treat attention/status/next-step metadata as separate review metadata, not as part of the approvable draft.
 9. Use `worklog_edit_session_log` for requested edits. Prefer the flexible `sections` object for custom formats. Editing a draft does not require explicit user approval; ask for explicit approval only before finalizing the session log.
 10. Call `worklog_approve_session_log` only after explicit user approval. Pass `confirmed_by_user: true`, the user's exact `confirmation_quote`, and the reviewed `session_log_id`.
@@ -145,7 +149,7 @@ When a session log contains a false start, discarded plan, or superseded diagnos
 Do not carry over routine session details such as exact commands, branch names, PR mechanics, exact commit hashes, exhaustive file lists, validation receipts, intermediate status updates, local worktree state, or conversational Q&A unless they materially affect future project decisions or resumption. Keep those details in the session log.
 Do not include review-loop mechanics such as "review this draft" or "approve this project log" inside project-log sections. Those belong in review metadata or the surrounding chat, not in the approvable project log.
 
-3. Before storing the draft, run a reflection pass: check that useful carry-forward facts from the previous approved project log are preserved, stale facts are updated or removed, every supplied approved session log has been considered, and the newest session log has not dominated the project log by mere recency. For each new or changed item, ask: "Would a future agent need this to resume or make a better decision?" If not, leave it in the session log only.
+3. Before storing the draft, run a reflection pass: check that useful carry-forward facts from the previous approved project log are preserved, stale facts are updated or removed, every supplied approved session log has been considered, and the newest session log has not dominated the project log by mere recency. For each new or changed item, ask: "Would a future agent need this to resume or make a better decision?" If not, leave it in the session log only. For every factual claim, identify its support in approved Worklog state or source session logs; label hypotheses, inferences, assumptions, suspected causes, and unverified results or insights explicitly instead of writing them as durable facts.
 4. Call `worklog_draft_project_log` again with the same `session_log_id` or `session_log_ids` plus the authored `sections` or `fields`. Worklog stores this as a draft; it should not mechanically generate the rollup.
 5. Present the exact rendered project log draft as normal chat content with headings and lists, and ask whether the user wants edits or approval. Do not wrap the log in a fenced Markdown/code block or otherwise show raw Markdown source unless the user explicitly asks for raw Markdown. Treat pending-update/status metadata as separate review metadata, not as part of the approvable draft.
 6. Use `worklog_edit_project_log` for requested edits. Prefer the flexible `sections` object for custom formats. Editing a draft does not require explicit user approval; ask for explicit approval only before finalizing the project log.
@@ -158,6 +162,7 @@ For shared projects, only a project approver should approve the project log. If 
 - Never claim a session log or project log is approved until the approval tool succeeds.
 - Do not infer approval from silence or general positivity.
 - Do not require explicit user approval for ordinary draft mutation. Explicit approval is required for approving/finalizing logs, template changes, sharing changes, and publishing boundaries.
+- Ground factual claims in source events, approved Worklog state, validation output, or user-confirmed facts; explicitly label hypotheses, inferences, assumptions, suspected causes, and unverified results or insights in the log text.
 - Do not draft or print session logs as intermediate progress. Draft a session log only when the tracked task is clearly complete, the user explicitly asks to log or review the session, or the agent must stop and preserve reviewed state.
 - If there is reasonable ambiguity about whether the user intends to continue the tracked task, ask before drafting a session log. Do not treat a completed substep, a status update, or an idle turn as session completion.
 - Every `worklog_draft_session_log` call must include a `review_reason` matching the timing gate: `task_complete`, `user_requested_log_review`, or `agent_must_stop`.
