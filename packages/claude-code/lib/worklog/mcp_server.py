@@ -598,13 +598,25 @@ class Server:
             join_settings_patch = shared_project_settings_patch(project_dir, requested_project_id=project_id)
             if join_settings_patch.get("permissions"):
                 permissions = normalize_permission_policy(join_settings_patch["permissions"])
-        permission_plan = backend_permission_plan(
-            project_id,
-            effective_backend,
-            sharing_provider,
-            shared_location_from_args(args),
-            permissions,
-            actor=actor,
+        shared_location = shared_location_from_args(args)
+        permission_plan = (
+            join_backend_permission_plan(
+                project_id,
+                effective_backend,
+                sharing_provider,
+                shared_location,
+                permissions,
+                actor=actor,
+            )
+            if mode == "join"
+            else backend_permission_plan(
+                project_id,
+                effective_backend,
+                sharing_provider,
+                shared_location,
+                permissions,
+                actor=actor,
+            )
         )
         permission_verification = backend_permission_verification_evidence(args, sharing_provider, permission_plan)
         settings = dict(existing)
@@ -2883,6 +2895,39 @@ def backend_permission_plan(
             for member in members_for_action
         ],
         "provider_permission_note": note,
+    }
+
+
+def join_backend_permission_plan(
+    project_id: str,
+    backend: str,
+    sharing_provider: str | None,
+    shared_location: dict[str, str],
+    permissions: dict[str, Any],
+    *,
+    actor: str,
+) -> dict[str, Any]:
+    project_dir = shared_location.get("shared_project_dir") or resulting_project_dir_example(
+        project_id,
+        shared_location.get("root") or "<shared-root>",
+    )
+    return {
+        "required": False,
+        "backend": backend,
+        "sharing_provider": sharing_provider,
+        "capability": "shared_project_access_inherited",
+        "operation": "join",
+        "project_id": project_id,
+        "shared_location": shared_location,
+        "project_dir": project_dir,
+        "members": [],
+        "actions": [],
+        "observed_members": backend_permission_members(permissions, actor=actor),
+        "provider_permission_note": (
+            "Join/import uses the backend access already granted on the shared location. "
+            "Worklog does not apply ACL changes during join; use worklog_update_project_members "
+            "later when changing shared-project membership."
+        ),
     }
 
 

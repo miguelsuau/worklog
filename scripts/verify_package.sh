@@ -256,6 +256,12 @@ with tempfile.TemporaryDirectory(prefix="worklog-shared-join-") as temp_name:
     )
     if joined["setup_state"]["status"] != "complete":
         raise SystemExit("Expected join/import to leave local setup complete.")
+    backend_permissions = joined["project_sharing"].get("backend_permissions") or {}
+    if backend_permissions.get("permission_status") == "pending_backend_verification":
+        raise SystemExit("Join/import must not leave backend permissions pending.")
+    permission_plan = backend_permissions.get("last_permission_plan") or {}
+    if permission_plan.get("required") or permission_plan.get("actions"):
+        raise SystemExit("Join/import must not create backend ACL actions for existing shared members.")
     if not any(item["type"] == "session_log" for item in joined["setup"]["pulled"]):
         raise SystemExit("Expected join/import to pull approved session logs.")
     if not any(item["type"] in {"project_log", "current_project_log"} for item in joined["setup"]["pulled"]):
