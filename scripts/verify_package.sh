@@ -22,6 +22,22 @@ for package in packages:
     vendored = package / "lib" / "worklog" / "mcp_server.py"
     if vendored.read_bytes() != source.read_bytes():
         raise SystemExit(f"{vendored} differs from shared source.")
+
+required_skill_phrases = [
+    "When a substantive Worklog-tracked task is clearly complete, draft and present the session log automatically",
+    "Do not merely offer to create the session log later.",
+]
+skill_paths = [
+    repo / "skill" / "worklog.body.md",
+    repo / "packages" / "claude" / "skills" / "worklog" / "SKILL.md",
+    repo / "packages" / "claude-code" / "SKILL.md",
+    repo / "packages" / "codex" / "skills" / "worklog" / "SKILL.md",
+]
+for path in skill_paths:
+    text = path.read_text(encoding="utf-8")
+    for phrase in required_skill_phrases:
+        if phrase not in text:
+            raise SystemExit(f"{path} is missing required session-log completion guidance: {phrase}")
 PY
 
 "${repo_root}/scripts/build_packages.sh" >/dev/null
