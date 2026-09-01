@@ -46,6 +46,12 @@ clearly complete, the user explicitly asks to log or review the session, or the
 agent must stop and preserve reviewed state. If the task may reasonably
 continue, the assistant should ask before drafting.
 
+Session and project logs must distinguish facts from hypotheses. Factual claims
+should be grounded in source events, approved Worklog state, validation output,
+or user-confirmed facts. Hypotheses, inferences, assumptions, suspected causes,
+and unverified experiment results or insights must be labeled explicitly in the
+log text, for example `Hypothesis:`, `Inference:`, or `Unverified result:`.
+
 ## Sharing
 
 Worklog can be used for local-only projects or shared projects. The sharing

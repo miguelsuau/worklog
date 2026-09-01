@@ -259,7 +259,10 @@ class Server:
                 "project log plus recent approved session logs. For review flows, show "
                 "draft text to the user first and call approval tools only after explicit "
                 "confirmation with confirmed_by_user=true and confirmation_quote set to "
-                "the user's words. Shared projects keep drafts local and publish only "
+                "the user's words. When authoring logs, ground factual claims in source "
+                "events, approved Worklog state, validation output, or user-confirmed "
+                "facts; label hypotheses, inferences, assumptions, suspected causes, "
+                "and unverified results or insights explicitly. Shared projects keep drafts local and publish only "
                 "approved session logs, approved project logs, and approved project "
                 "settings. Everyone may approve their own session logs; project-log "
                 "approval is controlled by the project's Worklog policy and by the "
@@ -4223,6 +4226,7 @@ def render_session_log_authoring_next_step() -> str:
         "Next:",
         "- The assistant should author the session log from the bounded source-event slice and the user's session-log template.",
         "- Continue session-log review only because a timing gate was met: the tracked task is complete, the user explicitly asked to log/review, or the agent must stop.",
+        "- Separate observed facts from hypotheses, inferences, assumptions, suspected causes, and unverified results; label anything non-factual explicitly in the log text.",
         "- Before asking for approval, run a reflection pass against the source-event slice to check for missed outcomes, decisions, validation, open questions, and next actions.",
         "- Keep raw source events out of chat unless the user asks to inspect them.",
         "- Then call `worklog_edit_session_log` with the authored sections.",
@@ -4235,6 +4239,8 @@ def session_log_reflection_checklist() -> list[str]:
         "Compare the authored session-log sections against the bounded source-event slice.",
         "Confirm the timing gate is still valid: the tracked task is complete, the user explicitly asked to log/review, or the agent must stop.",
         "Check that important outcomes, decisions, validation, open questions, and next actions are represented in the user's template sections.",
+        "Check that factual claims are grounded in source events, approved Worklog state, validation output, or user-confirmed facts.",
+        "Explicitly label hypotheses, inferences, assumptions, suspected causes, proposed explanations, and unverified experiment results or insights.",
         "Keep routine command details and raw event text out of chat unless the user asks to inspect source events.",
         "Confirm the draft has project_id and enough authored section content before requesting approval.",
     ]
@@ -4335,6 +4341,7 @@ def render_project_rollup_authoring(
             "- Author a coherent project-log draft in the user's project-log format.",
             "- Start from the previous approved project log as the base, then merge in only durable deltas from approved session logs.",
             "- Place facts only in sections where they semantically belong.",
+            "- Label hypotheses, inferences, assumptions, suspected causes, and unverified results or insights explicitly; do not promote them to durable facts.",
             "- Replace superseded theories, plans, and status with the current truth instead of carrying both old and new versions.",
             "- Omit PR mechanics, exact commands, validation receipts, local branch state, and detailed file lists unless they materially affect future resumption.",
             "- Run a reflection pass before review: check that relevant carry-forward facts are preserved, obsolete facts are removed or updated, every pending approved session log has been considered, and the newest session log has not dominated the project log by mere recency.",
@@ -4351,6 +4358,8 @@ def project_rollup_reflection_checklist() -> list[str]:
         "Update or remove stale facts instead of copying the previous project log mechanically.",
         "Check every approved source session log supplied for durable outcomes, decisions, risks, and next actions, but do not give the newest session log special weight merely because it is newest.",
         "For each new or changed item, ask whether a future agent would act differently because it is in the project log; otherwise keep it in the session log only.",
+        "For each factual claim, identify its support in approved Worklog state, source session logs, validation output, or user-confirmed facts.",
+        "Explicitly label hypotheses, inferences, assumptions, suspected causes, and unverified experiment results or insights instead of writing them as facts.",
         "Replace superseded theories, plans, and status with the current truth instead of carrying both old and new versions.",
         "Keep routine session evidence, PR mechanics, exact commands, validation receipts, local branch state, and detailed file lists in session logs unless they materially affect future project resumption.",
     ]
@@ -4362,6 +4371,7 @@ def project_log_reflection_checklist() -> list[str]:
         "Check that project-log sections contain durable resume state rather than audit-trail detail.",
         "Check for recency bias: the latest session log should not be overrepresented unless it changed durable project state.",
         "Remove PR mechanics, exact commands, validation receipts, local branch state, and detailed file lists unless they materially affect future resumption.",
+        "Confirm factual claims are evidence-grounded, and explicitly label hypotheses, inferences, assumptions, suspected causes, and unverified results or insights.",
         "Replace superseded theories, plans, and status with the current truth instead of carrying both old and new versions.",
         "Move review-loop instructions such as approving the draft out of project-log sections and into review metadata.",
         "Confirm relevant carry-forward facts are preserved and stale facts are updated or removed.",
