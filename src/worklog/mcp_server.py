@@ -253,7 +253,10 @@ class Server:
                 "draft but does not mechanically decide where facts belong. Rollups "
                 "should merge and prune durable resume state; recency is not "
                 "importance, and the newest session log should not dominate merely "
-                "because it is newest. When starting a project, ask about the "
+                "because it is newest. When a substantive Worklog-tracked task is "
+                "clearly complete, draft and present a session log automatically in "
+                "the same response that reports completion; ask first only if "
+                "continuation is reasonably ambiguous. When starting a project, ask about the "
                 "nature of the work first, then have the LLM propose a structure; "
                 "accept custom structures. Resume context is generated from an approved "
                 "project log plus recent approved session logs. For review flows, show "
@@ -3472,7 +3475,7 @@ def schemas() -> list[dict[str, Any]]:
         ),
         schema(
             "worklog_draft_session_log",
-            "Create a source-bounded session-log draft seed. Call only when the tracked task is clearly complete, the user explicitly asked to log/review the session, or the agent must stop. Captures the current host transcript first by default when available, continues after the latest approved session log for the same source session/project unless explicit range arguments are provided, and returns the bounded source-event slice as private authoring context for the assistant.",
+            "Create a source-bounded session-log draft seed. Call when the tracked task is clearly complete, the user explicitly asked to log/review the session, or the agent must stop. For a clearly complete substantive Worklog-tracked task, call automatically before the completion response instead of only offering to log later. Captures the current host transcript first by default when available, continues after the latest approved session log for the same source session/project unless explicit range arguments are provided, and returns the bounded source-event slice as private authoring context for the assistant.",
             {
                 "session_id": {"type": "string"},
                 "project_id": {"type": "string"},
@@ -4203,8 +4206,10 @@ def require_session_log_review_reason(args: dict[str, Any]) -> str:
         "Before drafting a session log, pass `review_reason` as one of: "
         f"{options}. Draft session logs only when one timing gate is true: "
         "the tracked task is clearly complete, the user explicitly asked to log or review "
-        "the session, or the agent must stop and preserve reviewed state. If the task may "
-        "reasonably continue, ask the user before drafting."
+        "the session, or the agent must stop and preserve reviewed state. When a substantive "
+        "Worklog-tracked task is clearly complete, draft and present the session log automatically "
+        "instead of merely offering to log later. If the task may reasonably continue, ask the user "
+        "before drafting."
     )
 
 
@@ -4225,7 +4230,8 @@ def render_session_log_authoring_next_step() -> str:
     return lines(
         "Next:",
         "- The assistant should author the session log from the bounded source-event slice and the user's session-log template.",
-        "- Continue session-log review only because a timing gate was met: the tracked task is complete, the user explicitly asked to log/review, or the agent must stop.",
+        "- Continue session-log review because a timing gate was met: the tracked task is clearly complete, the user explicitly asked to log/review, or the agent must stop.",
+        "- If the tracked task is clearly complete, present the session log in the same completion response instead of only offering to log later.",
         "- Separate observed facts from hypotheses, inferences, assumptions, suspected causes, and unverified results; label anything non-factual explicitly in the log text.",
         "- Before asking for approval, run a reflection pass against the source-event slice to check for missed outcomes, decisions, validation, open questions, and next actions.",
         "- Keep raw source events out of chat unless the user asks to inspect them.",

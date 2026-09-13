@@ -41,10 +41,12 @@ Worklog is built around four core concepts:
 Worklog does not ship predefined legal, medical, engineering, or research templates. The assistant proposes a structure from the nature of the project, then stores only the user-approved templates.
 
 Session logs are drafted at real review boundaries, not as intermediate
-progress updates. The assistant should draft one only when the tracked task is
-clearly complete, the user explicitly asks to log or review the session, or the
-agent must stop and preserve reviewed state. If the task may reasonably
-continue, the assistant should ask before drafting.
+progress updates. When a substantive tracked task is clearly complete, the
+assistant must draft and present a session log in the completion response rather
+than merely offering to do it later. The assistant should also draft when the
+user explicitly asks to log or review the session, or when the agent must stop
+and preserve reviewed state. If the task may reasonably continue, the assistant
+should ask before drafting.
 
 Session and project logs must distinguish facts from hypotheses. Factual claims
 should be grounded in source events, approved Worklog state, validation output,
