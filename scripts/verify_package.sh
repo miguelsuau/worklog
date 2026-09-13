@@ -26,6 +26,10 @@ for package in packages:
 required_skill_phrases = [
     "When a substantive Worklog-tracked task is clearly complete, draft and present the session log automatically",
     "Do not merely offer to create the session log later.",
+    "The default is `allow_non_worklog_project_memory: false`.",
+    "Non-Worklog project memory files may contain unapproved agent-written claims",
+    "Approved Worklog session logs and project logs are the source of reviewed project truth",
+    "Living project-log titles should stay stable at the project level",
 ]
 skill_paths = [
     repo / "skill" / "worklog.body.md",
@@ -37,7 +41,17 @@ for path in skill_paths:
     text = path.read_text(encoding="utf-8")
     for phrase in required_skill_phrases:
         if phrase not in text:
-            raise SystemExit(f"{path} is missing required session-log completion guidance: {phrase}")
+            raise SystemExit(f"{path} is missing required Worklog guidance: {phrase}")
+
+server_text = source.read_text(encoding="utf-8")
+for phrase in (
+    "allow_non_worklog_project_memory",
+    "source of reviewed project truth",
+    "unapproved agent-written claims",
+    "Keep living project-log titles stable at the project level",
+):
+    if phrase not in server_text:
+        raise SystemExit(f"{source} is missing required memory-policy guidance: {phrase}")
 PY
 
 "${repo_root}/scripts/build_packages.sh" >/dev/null
@@ -89,6 +103,12 @@ except UserError as exc:
         raise SystemExit("Missing review_reason error should explain the timing gate.")
 else:
     raise SystemExit("Expected missing review_reason to block session-log drafting.")
+
+set_templates_schema = next(item for item in schemas() if item["name"] == "worklog_set_project_templates")
+set_templates_props = set_templates_schema["inputSchema"]["properties"]
+for field in ("allow_non_worklog_project_memory", "non_worklog_project_memory_warning_acknowledged"):
+    if field not in set_templates_props:
+        raise SystemExit(f"worklog_set_project_templates is missing memory-policy field {field}.")
 
 
 def project_log(next_actions):
@@ -142,6 +162,82 @@ SMOKE_TEMPLATE = {
 def smoke_server(store: Path) -> Server:
     os.environ["WORKLOG_STORE"] = str(store)
     return Server()
+
+
+with tempfile.TemporaryDirectory(prefix="worklog-memory-policy-") as temp_name:
+    server = smoke_server(Path(temp_name))
+    default_result = server.set_project_templates(
+        {
+            "project_id": "memory_policy_default",
+            "project_nature": "policy smoke test",
+            "session_log_template": SMOKE_TEMPLATE,
+            "project_log_template": SMOKE_TEMPLATE,
+            "confirmed_by_user": True,
+            "confirmation_quote": "approved",
+        }
+    )
+    default_policy = default_result["project_templates"]["agent_memory_policy"]
+    if default_policy.get("allow_non_worklog_project_memory") is not False:
+        raise SystemExit("Non-Worklog project memory files must default to false.")
+    if "source of reviewed project truth" not in default_result["text"]:
+        raise SystemExit("Rendered project templates should show Worklog as the reviewed truth source.")
+    try:
+        server.draft_project_log(
+            {
+                "project_id": "memory_policy_default",
+                "title": "Memory policy update",
+                "sections": {"summary": "Initial policy state.", "next_actions": ["continue"]},
+            }
+        )
+    except UserError as exc:
+        if "titles must stay stable" not in str(exc):
+            raise SystemExit("Update-specific project-log title rejection should explain the stable-title rule.")
+    else:
+        raise SystemExit("Expected update-specific project-log title to be rejected.")
+    stable_title_draft = server.draft_project_log(
+        {
+            "project_id": "memory_policy_default",
+            "title": "Project Log: memory_policy_default",
+            "sections": {"summary": "Initial policy state.", "next_actions": ["continue"]},
+        }
+    )
+    if stable_title_draft["project_log"]["title"] != "Project Log: memory_policy_default":
+        raise SystemExit("Project-log draft should keep the stable project-level title.")
+    try:
+        server.set_project_templates(
+            {
+                "project_id": "memory_policy_opt_in",
+                "project_nature": "policy smoke test",
+                "session_log_template": SMOKE_TEMPLATE,
+                "project_log_template": SMOKE_TEMPLATE,
+                "allow_non_worklog_project_memory": True,
+                "confirmed_by_user": True,
+                "confirmation_quote": "approved",
+            }
+        )
+    except UserError as exc:
+        if "unapproved agent-written claims" not in str(exc):
+            raise SystemExit("Opting into non-Worklog memory should explain the warning.")
+    else:
+        raise SystemExit("Expected non-Worklog memory opt-in to require warning acknowledgement.")
+    enabled_result = server.set_project_templates(
+        {
+            "project_id": "memory_policy_opt_in",
+            "project_nature": "policy smoke test",
+            "session_log_template": SMOKE_TEMPLATE,
+            "project_log_template": SMOKE_TEMPLATE,
+            "allow_non_worklog_project_memory": True,
+            "non_worklog_project_memory_warning_acknowledged": True,
+            "confirmed_by_user": True,
+            "confirmation_quote": "approved after warning",
+        }
+    )
+    enabled_policy = enabled_result["project_templates"]["agent_memory_policy"]
+    if enabled_policy.get("allow_non_worklog_project_memory") is not True:
+        raise SystemExit("Expected acknowledged non-Worklog memory opt-in to be stored.")
+    resume = server.resume_context({"project_id": "memory_policy_opt_in", "save": False})
+    if "Non-Worklog project memory files are explicitly allowed" not in resume["text"]:
+        raise SystemExit("Resume context should surface the non-Worklog memory opt-in.")
 
 
 def smoke_configure_project(server: Server, project_id: str, approver: str) -> None:

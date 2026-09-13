@@ -151,6 +151,16 @@ DEFAULT_PERMISSION_POLICY = {
     "template_changes": "maintainers_only",
 }
 
+NON_WORKLOG_PROJECT_MEMORY_WARNING = (
+    "Non-Worklog project memory files may contain unapproved agent-written claims "
+    "and can influence later agent decisions outside the reviewed Worklog approval flow."
+)
+
+DEFAULT_AGENT_MEMORY_POLICY = {
+    "allow_non_worklog_project_memory": False,
+    "warning": NON_WORKLOG_PROJECT_MEMORY_WARNING,
+}
+
 
 def main() -> int:
     server = Server()
@@ -265,7 +275,14 @@ class Server:
                 "the user's words. When authoring logs, ground factual claims in source "
                 "events, approved Worklog state, validation output, or user-confirmed "
                 "facts; label hypotheses, inferences, assumptions, suspected causes, "
-                "and unverified results or insights explicitly. Shared projects keep drafts local and publish only "
+                "and unverified results or insights explicitly. Approved Worklog session logs "
+                "and project logs are the source of reviewed project truth. During setup, "
+                "ask whether agents may create or rely on project memory files outside "
+                "Worklog; default to false. If the user opts in, warn that those files may "
+                "contain unapproved agent-written claims and can influence later agent "
+                "decisions outside the reviewed Worklog approval flow. Keep living project-log "
+                "titles stable at the project level; put update-specific context in sections "
+                "such as Current State or Next Actions. Shared projects keep drafts local and publish only "
                 "approved session logs, approved project logs, and approved project "
                 "settings. Everyone may approve their own session logs; project-log "
                 "approval is controlled by the project's Worklog policy and by the "
@@ -376,6 +393,7 @@ class Server:
             "created_or_updated_at": now(),
             "session_log_template": session_template,
             "project_log_template": project_template,
+            "agent_memory_policy": normalize_agent_memory_policy(args, existing),
             "confirmation_quote": str(args.get("confirmation_quote")),
         }
         preserve_project_settings_fields(settings, existing)
@@ -1156,6 +1174,7 @@ class Server:
             if len(projects) != 1:
                 raise UserError("Provide project_id or call worklog_list_projects first.")
             project_id = projects[0]["project_id"]
+        settings = self.db.project_settings(project_id)
         project_log = self.db.latest_project_log(project_id, status="approved")
         recent = self.db.session_logs(project_id, status="approved")[: int(args.get("recent", 3))]
         pending = pending_session_logs(self.db, project_id)
@@ -1166,7 +1185,8 @@ class Server:
             "project_log_id": project_log["id"] if project_log else None,
             "session_log_ids": [log["id"] for log in recent],
             "pending_project_update_session_log_ids": [log["id"] for log in pending],
-            "text": render_resume(project_id, project_log, recent, pending),
+            "agent_memory_policy": agent_memory_policy(settings),
+            "text": render_resume(project_id, project_log, recent, pending, settings),
         }
         if args.get("save", True):
             self.db.write("resume_contexts", context["id"], context)
@@ -1428,7 +1448,7 @@ class FileSharingBackend(SharingBackend):
             local = db.project_settings(project_id)
             merged = dict(local)
             if remote_settings:
-                for key in ("project_nature", "session_log_template", "project_log_template"):
+                for key in ("project_nature", "session_log_template", "project_log_template", "agent_memory_policy"):
                     if key in remote_settings:
                         merged[key] = remote_settings[key]
             if remote_permissions:
@@ -1556,13 +1576,7 @@ class FileSharingBackend(SharingBackend):
         project_dir = self.project_dir(project_id)
         published = []
         conflicts = []
-        template_payload = {
-            "project_id": project_id,
-            "project_nature": settings.get("project_nature"),
-            "session_log_template": settings.get("session_log_template"),
-            "project_log_template": settings.get("project_log_template"),
-            "updated_at": now(),
-        }
+        template_payload = settings_payload(settings)
         permissions = normalize_permission_policy(settings.get("permissions"))
         for artifact_type, target, payload in (
             ("templates", project_dir / "templates.json", template_payload),
@@ -1911,6 +1925,8 @@ def shared_project_settings_patch_from_payloads(
             if isinstance(templates.get(key), dict):
                 fallback = DEFAULT_SESSION_TEMPLATE if key == "session_log_template" else DEFAULT_PROJECT_TEMPLATE
                 patch[key] = normalize_template(templates[key], fallback=fallback)
+        if isinstance(templates.get("agent_memory_policy"), dict):
+            patch["agent_memory_policy"] = agent_memory_policy(templates)
     if permissions:
         patch["permissions"] = normalize_permission_policy(permissions)
     return patch
@@ -1955,7 +1971,7 @@ def local_shared_project_state(
 
 def project_settings_changes(current: dict[str, Any], proposed: dict[str, Any]) -> list[str]:
     changes = []
-    for key in ("project_nature", "session_log_template", "project_log_template", "permissions"):
+    for key in ("project_nature", "session_log_template", "project_log_template", "agent_memory_policy", "permissions"):
         if key not in proposed:
             continue
         current_value = current.get(key)
@@ -3026,6 +3042,7 @@ def actor_from_args(args: dict[str, Any]) -> str:
 
 def preserve_project_settings_fields(settings: dict[str, Any], existing: dict[str, Any]) -> None:
     for key in (
+        "agent_memory_policy",
         "sharing",
         "permissions",
         "backend_permissions",
@@ -3036,6 +3053,56 @@ def preserve_project_settings_fields(settings: dict[str, Any], existing: dict[st
     ):
         if key in existing and key not in settings:
             settings[key] = existing[key]
+
+
+def normalize_agent_memory_policy(args: dict[str, Any], existing: dict[str, Any]) -> dict[str, Any]:
+    existing_policy = existing.get("agent_memory_policy") if isinstance(existing, dict) else None
+    was_allowed = False
+    if isinstance(existing_policy, dict):
+        was_allowed = bool(existing_policy.get("allow_non_worklog_project_memory", False))
+    allow = was_allowed
+    if "allow_non_worklog_project_memory" in args:
+        allow = args.get("allow_non_worklog_project_memory") is True
+    else:
+        allow = False if not existing_policy else was_allowed
+    if allow and not was_allowed and args.get("non_worklog_project_memory_warning_acknowledged") is not True:
+        raise UserError(
+            "Before allowing non-Worklog project memory files, show this warning and get explicit user acknowledgement: "
+            f"{NON_WORKLOG_PROJECT_MEMORY_WARNING}"
+        )
+    policy = dict(DEFAULT_AGENT_MEMORY_POLICY)
+    if isinstance(existing_policy, dict):
+        policy.update(
+            {
+                key: existing_policy[key]
+                for key in ("confirmed_at", "confirmation_quote")
+                if existing_policy.get(key)
+            }
+        )
+    policy["allow_non_worklog_project_memory"] = allow
+    if allow:
+        policy["warning_acknowledged"] = True
+        if args.get("non_worklog_project_memory_warning_acknowledged") is True or not policy.get("confirmed_at"):
+            policy["confirmed_at"] = now()
+            policy["confirmation_quote"] = str(args.get("confirmation_quote", ""))
+    else:
+        policy["warning_acknowledged"] = False
+        policy.pop("confirmed_at", None)
+        policy.pop("confirmation_quote", None)
+    return policy
+
+
+def agent_memory_policy(settings: dict[str, Any] | None) -> dict[str, Any]:
+    policy = dict(DEFAULT_AGENT_MEMORY_POLICY)
+    if isinstance(settings, dict) and isinstance(settings.get("agent_memory_policy"), dict):
+        existing = settings["agent_memory_policy"]
+        policy["allow_non_worklog_project_memory"] = bool(existing.get("allow_non_worklog_project_memory", False))
+        policy["warning"] = str(existing.get("warning") or NON_WORKLOG_PROJECT_MEMORY_WARNING)
+        if existing.get("warning_acknowledged"):
+            policy["warning_acknowledged"] = True
+        if existing.get("confirmed_at"):
+            policy["confirmed_at"] = existing["confirmed_at"]
+    return policy
 
 
 def project_setup_state(db: Store, settings: dict[str, Any]) -> dict[str, Any]:
@@ -3235,6 +3302,7 @@ def settings_payload(settings: dict[str, Any]) -> dict[str, Any]:
         "project_nature": settings.get("project_nature"),
         "session_log_template": settings.get("session_log_template"),
         "project_log_template": settings.get("project_log_template"),
+        "agent_memory_policy": agent_memory_policy(settings),
         "updated_at": now(),
     }
 
@@ -3334,12 +3402,20 @@ def schemas() -> list[dict[str, Any]]:
         ),
         schema(
             "worklog_set_project_templates",
-            "Set the user-approved session-log and project-log templates for a project.",
+            "Set the user-approved session-log and project-log templates for a project, plus the setup-approved policy for non-Worklog project memory files.",
             {
                 "project_id": {"type": "string"},
                 "project_nature": {"type": "string"},
                 "session_log_template": any_object,
                 "project_log_template": any_object,
+                "allow_non_worklog_project_memory": {
+                    "type": "boolean",
+                    "description": "Defaults to false. Set true only when the user explicitly allows agents to create or rely on project memory files outside Worklog.",
+                },
+                "non_worklog_project_memory_warning_acknowledged": {
+                    "type": "boolean",
+                    "description": "Required as true when allow_non_worklog_project_memory is true, after showing the warning about unapproved agent-written claims.",
+                },
                 "confirmed_by_user": {"type": "boolean"},
                 "confirmation_quote": {"type": "string"},
             },
@@ -3531,7 +3607,7 @@ def schemas() -> list[dict[str, Any]]:
         ),
         schema(
             "worklog_draft_project_log",
-            "Prepare project-rollup context, or store an LLM-authored project log draft when sections/fields are provided.",
+            "Prepare project-rollup context, or store an LLM-authored project log draft when sections/fields are provided. Keep living project-log titles stable at the project level; put update-specific context in sections such as Current State or Next Actions.",
             {
                 "project_id": {"type": "string"},
                 "session_log_id": {"type": "string"},
@@ -4025,7 +4101,7 @@ def make_project_log(
         return {
             "id": uid("project_log"),
             "project_id": project_id,
-            "title": f"Project Log: {project_id}",
+            "title": stable_project_log_title(project_id),
             "version": 1,
             "status": "draft",
             "created_at": stamp,
@@ -4046,7 +4122,7 @@ def make_project_log(
         {
             "id": uid("project_log"),
             "project_id": project_id,
-            "title": previous.get("title") or f"Project Log: {project_id}",
+            "title": stable_project_log_title(project_id),
             "version": int(previous.get("version", 1)) + 1,
             "status": "draft",
             "created_at": stamp,
@@ -4059,6 +4135,10 @@ def make_project_log(
         }
     )
     return draft
+
+
+def stable_project_log_title(project_id: str) -> str:
+    return f"Project Log: {project_id}"
 
 
 SESSION_LOG_EDITABLE = {
@@ -4141,7 +4221,15 @@ def apply_project_patch(log: dict[str, Any], patch: dict[str, Any]) -> None:
             log["sections"] = sections
             continue
         if name == "title":
-            log[name] = str(value).strip()
+            title = str(value).strip()
+            expected = stable_project_log_title(str(log.get("project_id") or ""))
+            if title and title != expected:
+                raise UserError(
+                    "Project log titles must stay stable at the project level. "
+                    f"Use `{expected}` as the title and put update-specific context in sections "
+                    "such as Current State or Next Actions."
+                )
+            log[name] = expected
             continue
         sections = sections_from_log(log)
         sections[section_key(name)] = normalize_section_value(value)
@@ -4345,6 +4433,7 @@ def render_project_rollup_authoring(
             "",
             "Next:",
             "- Author a coherent project-log draft in the user's project-log format.",
+            f"- Keep the project-log title stable at `{stable_project_log_title(project_id)}`; put update-specific context in sections such as Current State or Next Actions.",
             "- Start from the previous approved project log as the base, then merge in only durable deltas from approved session logs.",
             "- Place facts only in sections where they semantically belong.",
             "- Label hypotheses, inferences, assumptions, suspected causes, and unverified results or insights explicitly; do not promote them to durable facts.",
@@ -4364,6 +4453,7 @@ def project_rollup_reflection_checklist() -> list[str]:
         "Update or remove stale facts instead of copying the previous project log mechanically.",
         "Check every approved source session log supplied for durable outcomes, decisions, risks, and next actions, but do not give the newest session log special weight merely because it is newest.",
         "For each new or changed item, ask whether a future agent would act differently because it is in the project log; otherwise keep it in the session log only.",
+        "Keep the project-log title stable at the project level; put update-specific context in sections such as Current State or Next Actions.",
         "For each factual claim, identify its support in approved Worklog state, source session logs, validation output, or user-confirmed facts.",
         "Explicitly label hypotheses, inferences, assumptions, suspected causes, and unverified experiment results or insights instead of writing them as facts.",
         "Replace superseded theories, plans, and status with the current truth instead of carrying both old and new versions.",
@@ -4377,6 +4467,7 @@ def project_log_reflection_checklist() -> list[str]:
         "Check that project-log sections contain durable resume state rather than audit-trail detail.",
         "Check for recency bias: the latest session log should not be overrepresented unless it changed durable project state.",
         "Remove PR mechanics, exact commands, validation receipts, local branch state, and detailed file lists unless they materially affect future resumption.",
+        "Keep the project-log title stable at the project level; put update-specific context in sections such as Current State or Next Actions.",
         "Confirm factual claims are evidence-grounded, and explicitly label hypotheses, inferences, assumptions, suspected causes, and unverified results or insights.",
         "Replace superseded theories, plans, and status with the current truth instead of carrying both old and new versions.",
         "Move review-loop instructions such as approving the draft out of project-log sections and into review metadata.",
@@ -4475,6 +4566,7 @@ def render_resume(
     project_log: dict[str, Any] | None,
     sessions: list[dict[str, Any]],
     pending: list[dict[str, Any]],
+    settings: dict[str, Any],
 ) -> str:
     output = [f"# Resume Context: {project_id}", "", f"Generated at: `{now()}`", ""]
     if project_log is None:
@@ -4497,6 +4589,7 @@ def render_resume(
             "- Treat this as reviewed Worklog state.",
             "- Do not treat raw source events as approved project-log state.",
             "- Treat recent session logs as supporting evidence, not as automatic project state; favor the approved project log unless pending updates contain durable changes.",
+            *render_agent_memory_policy_guidance(settings),
         ]
     )
     return "\n".join(output)
@@ -4559,6 +4652,13 @@ def render_project_start(
         output.append(f"- project_description: {project_description}")
     output.extend(
         [
+            "",
+            "Agent memory policy:",
+            "- Ask whether agents may create or rely on project memory files outside Worklog, such as `AGENTS.md`, `CLAUDE.md`, `memory.md`, scratch notes, or tool-specific project docs.",
+            "- The default is `allow_non_worklog_project_memory: false`.",
+            "- If false, approved Worklog session logs and project logs are the source of reviewed project truth; non-Worklog memory files must not override them.",
+            f"- If the user opts in, show this warning first: {NON_WORKLOG_PROJECT_MEMORY_WARNING}",
+            "- Pass `allow_non_worklog_project_memory` to `worklog_set_project_templates`; if true, also pass `non_worklog_project_memory_warning_acknowledged: true`.",
             "",
             "Sharing setup:",
             "- Ask whether this project is local-only or shared with team members.",
@@ -4638,10 +4738,28 @@ def render_template_authoring_lines(brief: dict[str, Any]) -> list[str]:
             "Available source channels:",
             "- " + ", ".join(TEMPLATE_AUTHORING_GUIDANCE["draft_from_options"]),
             "",
-            "Next: the assistant proposes templates in chat, the user edits/approves them, then call `worklog_set_project_templates` with the exact approved objects. After templates and sharing mode/backend are selected, collect initial project-log context and draft the first project log before treating setup as complete.",
+            "Memory policy setup:",
+            "- Ask whether agents may create or rely on project memory files outside Worklog. Default to `allow_non_worklog_project_memory: false`.",
+            f"- If the user opts in, first warn them: {NON_WORKLOG_PROJECT_MEMORY_WARNING}",
+            "- Approved Worklog session logs and project logs remain the source of reviewed project truth, and non-Worklog memory files should not override them unless this workflow is explicitly allowed.",
+            "",
+            "Next: the assistant proposes templates in chat, the user edits/approves them, then call `worklog_set_project_templates` with the exact approved objects and the approved memory policy. After templates, memory policy, and sharing mode/backend are selected, collect initial project-log context and draft the first project log before treating setup as complete.",
         ]
     )
     return output
+
+
+def render_agent_memory_policy_guidance(settings: dict[str, Any] | None) -> list[str]:
+    policy = agent_memory_policy(settings)
+    if policy["allow_non_worklog_project_memory"]:
+        return [
+            "- Non-Worklog project memory files are explicitly allowed for this project, but approved Worklog session logs and project logs remain the source of reviewed project truth.",
+            f"- Warning for non-Worklog project memory files: {policy['warning']}",
+        ]
+    return [
+        "- Non-Worklog project memory files are not approved for this project by default; do not create or rely on them as project memory unless the user explicitly opts in.",
+        "- Approved Worklog session logs and project logs are the source of reviewed project truth and should not be overridden by ad hoc notes or agent-authored memory files.",
+    ]
 
 
 def render_project_templates(settings: dict[str, Any]) -> str:
@@ -4650,6 +4768,14 @@ def render_project_templates(settings: dict[str, Any]) -> str:
         "",
         f"- project_nature: `{settings.get('project_nature', 'unconfigured')}`",
     ]
+    policy = agent_memory_policy(settings)
+    output.append(
+        f"- allow_non_worklog_project_memory: `{str(policy['allow_non_worklog_project_memory']).lower()}`"
+    )
+    if policy["allow_non_worklog_project_memory"]:
+        output.append(f"- non_worklog_project_memory_warning: {policy['warning']}")
+    else:
+        output.append("- Approved Worklog session logs and project logs are the source of reviewed project truth.")
     setup_state = settings.get("setup_state") if isinstance(settings.get("setup_state"), dict) else {}
     if setup_state.get("status"):
         output.append(f"- setup_status: `{setup_state['status']}`")
@@ -5277,6 +5403,7 @@ def default_project_settings(project_id: str | None) -> dict[str, Any]:
         "project_id": project_id,
         "project_nature": "unconfigured",
         "permissions": normalize_permission_policy(None),
+        "agent_memory_policy": dict(DEFAULT_AGENT_MEMORY_POLICY),
         "session_log_template": normalize_template(
             DEFAULT_SESSION_TEMPLATE,
             fallback=DEFAULT_SESSION_TEMPLATE,
