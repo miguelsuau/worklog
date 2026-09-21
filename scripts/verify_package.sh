@@ -82,6 +82,7 @@ from worklog.mcp_server import (  # noqa: E402
     SESSION_LOG_REVIEW_REASONS,
     Server,
     UserError,
+    file_token,
     project_log_approval_blockers,
     project_log_attention,
     require_session_log_review_reason,
@@ -317,6 +318,34 @@ def smoke_approve_session_log(server: Server, project_id: str, actor: str, text:
             "confirmation_quote": "approved",
         }
     )
+    return server.db.read("session_logs", edited["session_log"]["id"])
+
+
+def smoke_draft_session_log(server: Server, project_id: str, actor: str, text: str, session_id: str) -> dict:
+    added = server.add_event(
+        {
+            "project_id": project_id,
+            "session_id": session_id,
+            "text": text,
+            "speaker": actor,
+            "kind": "note",
+        }
+    )
+    draft = server.draft_session_log(
+        {
+            "project_id": project_id,
+            "session_id": added["session"]["id"],
+            "capture": False,
+            "review_reason": "task_complete",
+        }
+    )
+    edited = server.edit_session_log(
+        {
+            "session_log_id": draft["session_log"]["id"],
+            "sections": {"summary": text, "next_actions": ["do not publish drafts"]},
+        }
+    )
+    return edited["session_log"]
 
 
 with tempfile.TemporaryDirectory(prefix="worklog-shared-join-") as temp_name:
@@ -327,6 +356,7 @@ with tempfile.TemporaryDirectory(prefix="worklog-shared-join-") as temp_name:
     smoke_approve_project_log(author, project_id, "Author", "Initial shared project log.")
     smoke_approve_session_log(author, project_id, "Author", "Initial approved shared session.", "session-one")
     shared_root = temp / "shared"
+    shared_project_dir = shared_root / ".worklog" / "projects" / file_token(project_id)
     author.configure_project_sharing(
         {
             "project_id": project_id,
@@ -343,6 +373,14 @@ with tempfile.TemporaryDirectory(prefix="worklog-shared-join-") as temp_name:
         raise SystemExit("Expected initial approved session log to publish.")
     if not any(item["type"] == "project_log" for item in pushed["published"]):
         raise SystemExit("Expected initial approved project log to publish.")
+
+    draft = smoke_draft_session_log(author, project_id, "Author", "Draft shared session should stay local.", "draft-one")
+    draft_push = author.sync_project({"project_id": project_id, "direction": "push"})
+    draft_shared_path = shared_project_dir / "approved" / "session_logs" / f"{file_token(draft['id'])}.json"
+    if draft_shared_path.exists():
+        raise SystemExit("Draft session logs must not be published into approved shared session logs.")
+    if any(item.get("id") == draft["id"] for item in draft_push["published"]):
+        raise SystemExit("Sync push must not report draft session logs as published artifacts.")
 
     joiner = smoke_server(temp / "join-store")
     discovered = joiner.discover_shared_project(
@@ -381,7 +419,33 @@ with tempfile.TemporaryDirectory(prefix="worklog-shared-join-") as temp_name:
     if not any(item["type"] in {"project_log", "current_project_log"} for item in joined["setup"]["pulled"]):
         raise SystemExit("Expected join/import to pull approved project logs.")
 
-    smoke_approve_session_log(author, project_id, "Author", "Second approved shared session.", "session-two")
+    author.set_project_templates(
+        {
+            "project_id": project_id,
+            "project_nature": "shared implementation smoke test updated",
+            "session_log_template": SMOKE_TEMPLATE,
+            "project_log_template": SMOKE_TEMPLATE,
+            "confirmed_by_user": True,
+            "confirmation_quote": "approved settings update",
+        }
+    )
+    settings_dry = joiner.sync_project({"project_id": project_id, "direction": "pull", "dry_run": True})
+    if settings_dry["pull_summary"]["settings_updates"] != 1:
+        raise SystemExit("Expected dry-run pull to report changed shared project settings.")
+    if not any(
+        item["type"] == "project_settings"
+        and item["status"] == "would_update"
+        and "project_nature" in item.get("changes", [])
+        for item in settings_dry["pulled"]
+    ):
+        raise SystemExit("Expected dry-run pull to report project_nature as a would-update setting.")
+    settings_actual = joiner.sync_project({"project_id": project_id, "direction": "pull"})
+    if settings_actual["pull_summary"]["settings_updates"] != 1:
+        raise SystemExit("Expected pull to import changed shared project settings.")
+    if joiner.db.project_settings(project_id)["project_nature"] != "shared implementation smoke test updated":
+        raise SystemExit("Expected changed shared project settings to update the joined project.")
+
+    second_log = smoke_approve_session_log(author, project_id, "Author", "Second approved shared session.", "session-two")
     dry = joiner.sync_project({"project_id": project_id, "direction": "pull", "dry_run": True})
     if dry["pull_summary"]["pulled_session_logs"] < 1:
         raise SystemExit("Expected dry-run pull to report the new approved session log.")
@@ -390,9 +454,22 @@ with tempfile.TemporaryDirectory(prefix="worklog-shared-join-") as temp_name:
     actual = joiner.sync_project({"project_id": project_id, "direction": "pull"})
     if actual["pull_summary"]["pulled_session_logs"] < 1:
         raise SystemExit("Expected pull to import the new approved session log.")
+    if not any(log["id"] == second_log["id"] for log in actual["pending_project_updates"]):
+        raise SystemExit("Expected pulled approved session log to appear as a pending project-log update.")
     second = joiner.sync_project({"project_id": project_id, "direction": "pull", "dry_run": True})
     if second["pull_summary"]["pulled_session_logs"] != 0:
         raise SystemExit("Expected second dry-run pull to report no new session logs.")
+    divergent = joiner.db.read("session_logs", second_log["id"])
+    divergent["sections"]["summary"] = "Local divergent summary."
+    joiner.db.write("session_logs", second_log["id"], divergent)
+    conflict = joiner.sync_project({"project_id": project_id, "direction": "pull", "dry_run": True})
+    if not any(
+        item["type"] == "session_log"
+        and item.get("id") == second_log["id"]
+        and "differs" in item.get("reason", "")
+        for item in conflict["conflicts"]
+    ):
+        raise SystemExit("Expected pull to report local/shared artifact conflicts.")
 PY
 
 python3 - <<'PY'
