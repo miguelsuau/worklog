@@ -29,6 +29,7 @@ required_skill_phrases = [
     "The default is `allow_non_worklog_project_memory: false`.",
     "Non-Worklog project memory files may contain unapproved agent-written claims",
     "Approved Worklog session logs and project logs are the source of reviewed project truth",
+    "agents must not create, update, append to, or otherwise write project memory into non-Worklog memory files",
     "Living project-log titles should stay stable at the project level",
 ]
 skill_paths = [
@@ -46,6 +47,7 @@ for path in skill_paths:
 server_text = source.read_text(encoding="utf-8")
 for phrase in (
     "allow_non_worklog_project_memory",
+    "must not create, update, append to",
     "source of reviewed project truth",
     "unapproved agent-written claims",
     "Keep living project-log titles stable at the project level",

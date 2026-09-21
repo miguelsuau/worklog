@@ -277,8 +277,9 @@ class Server:
                 "facts; label hypotheses, inferences, assumptions, suspected causes, "
                 "and unverified results or insights explicitly. Approved Worklog session logs "
                 "and project logs are the source of reviewed project truth. During setup, "
-                "ask whether agents may create or rely on project memory files outside "
-                "Worklog; default to false. If the user opts in, warn that those files may "
+                "ask whether agents may create, write to, or rely on project memory files outside "
+                "Worklog; default to false. When false, agents must not create, update, append to, "
+                "or otherwise write project memory into non-Worklog memory files. If the user opts in, warn that those files may "
                 "contain unapproved agent-written claims and can influence later agent "
                 "decisions outside the reviewed Worklog approval flow. Keep living project-log "
                 "titles stable at the project level; put update-specific context in sections "
@@ -3410,7 +3411,7 @@ def schemas() -> list[dict[str, Any]]:
                 "project_log_template": any_object,
                 "allow_non_worklog_project_memory": {
                     "type": "boolean",
-                    "description": "Defaults to false. Set true only when the user explicitly allows agents to create or rely on project memory files outside Worklog.",
+                    "description": "Defaults to false. Set true only when the user explicitly allows agents to create, write to, or rely on project memory files outside Worklog.",
                 },
                 "non_worklog_project_memory_warning_acknowledged": {
                     "type": "boolean",
@@ -4654,9 +4655,9 @@ def render_project_start(
         [
             "",
             "Agent memory policy:",
-            "- Ask whether agents may create or rely on project memory files outside Worklog, such as `AGENTS.md`, `CLAUDE.md`, `memory.md`, scratch notes, or tool-specific project docs.",
+            "- Ask whether agents may create, write to, or rely on project memory files outside Worklog, such as `AGENTS.md`, `CLAUDE.md`, `memory.md`, scratch notes, or tool-specific project docs.",
             "- The default is `allow_non_worklog_project_memory: false`.",
-            "- If false, approved Worklog session logs and project logs are the source of reviewed project truth; non-Worklog memory files must not override them.",
+            "- If false, approved Worklog session logs and project logs are the source of reviewed project truth; agents must not create, update, append to, or otherwise write project memory into non-Worklog memory files.",
             f"- If the user opts in, show this warning first: {NON_WORKLOG_PROJECT_MEMORY_WARNING}",
             "- Pass `allow_non_worklog_project_memory` to `worklog_set_project_templates`; if true, also pass `non_worklog_project_memory_warning_acknowledged: true`.",
             "",
@@ -4739,9 +4740,9 @@ def render_template_authoring_lines(brief: dict[str, Any]) -> list[str]:
             "- " + ", ".join(TEMPLATE_AUTHORING_GUIDANCE["draft_from_options"]),
             "",
             "Memory policy setup:",
-            "- Ask whether agents may create or rely on project memory files outside Worklog. Default to `allow_non_worklog_project_memory: false`.",
+            "- Ask whether agents may create, write to, or rely on project memory files outside Worklog. Default to `allow_non_worklog_project_memory: false`.",
             f"- If the user opts in, first warn them: {NON_WORKLOG_PROJECT_MEMORY_WARNING}",
-            "- Approved Worklog session logs and project logs remain the source of reviewed project truth, and non-Worklog memory files should not override them unless this workflow is explicitly allowed.",
+            "- Approved Worklog session logs and project logs remain the source of reviewed project truth, and agents must not create, update, append to, or otherwise write project memory into non-Worklog memory files unless this workflow is explicitly allowed.",
             "",
             "Next: the assistant proposes templates in chat, the user edits/approves them, then call `worklog_set_project_templates` with the exact approved objects and the approved memory policy. After templates, memory policy, and sharing mode/backend are selected, collect initial project-log context and draft the first project log before treating setup as complete.",
         ]
@@ -4757,7 +4758,7 @@ def render_agent_memory_policy_guidance(settings: dict[str, Any] | None) -> list
             f"- Warning for non-Worklog project memory files: {policy['warning']}",
         ]
     return [
-        "- Non-Worklog project memory files are not approved for this project by default; do not create or rely on them as project memory unless the user explicitly opts in.",
+        "- Non-Worklog project memory files are not approved for this project by default; do not create, update, append to, or otherwise write project memory into them, and do not rely on them as project memory unless the user explicitly opts in.",
         "- Approved Worklog session logs and project logs are the source of reviewed project truth and should not be overridden by ad hoc notes or agent-authored memory files.",
     ]
 

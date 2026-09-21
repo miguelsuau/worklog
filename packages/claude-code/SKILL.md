@@ -19,7 +19,7 @@ reviewed truth; Worklog state becomes trustworthy only after user approval.
 - A project log is the approved, living project-level summary updated from approved session logs, using the user's chosen template.
 - Resume context is generated from the latest approved project log plus recent approved session logs.
 - Shared projects keep drafts local and publish only approved artifacts to the selected shared backend.
-- Approved Worklog session logs and project logs are the source of reviewed project truth. Non-Worklog project memory files must not override them unless the user explicitly opts into that workflow during setup.
+- Approved Worklog session logs and project logs are the source of reviewed project truth. Non-Worklog project memory files must not override them unless the user explicitly opts into that workflow during setup. When `allow_non_worklog_project_memory` is false, agents must not create, update, append to, or otherwise write project memory into non-Worklog memory files.
 
 Use Worklog terms consistently: "session log", "project log", "source events", and "resume context".
 
@@ -66,7 +66,7 @@ When a project starts, help the user decide how the session log and project log 
 5. Ask about the nature of the project when it is not obvious. Useful examples include legal matter, medical/clinical project, engineering project, research project, teaching project, finance project, or consulting engagement.
 6. Call `worklog_start_project` or `worklog_recommend_templates` to get the neutral authoring brief and sharing contract. If calling `worklog_start_project` after the user confirms this is new, pass `confirmed_new_project: true`.
 7. Ask whether the project is local-only or shared with team members. If shared, follow the sharing-destination workflow: first call `worklog_configure_project_sharing` without `sharing_provider` so Worklog can suggest providers, then ask the user to choose one provider. The first provider list should include mounted-folder options such as Google Drive, Dropbox, OneDrive, network folders, local folders, and Docker mounts; Git options such as GitHub, GitLab, and Bitbucket; and connector-backed project-management or ticketing systems such as Linear. After the user chooses the provider, call it again with `sharing_provider`; Worklog will build or inspect the provider backend/sync surface and then return path or connector-target options for that configured provider. Ask the user to choose one path or connector target only after that provider setup step has run. If Worklog returns `sharing_setup_stage: verify_sharing_provider_connection`, use an authenticated MCP/API connector first when it exposes the needed verification operation; if it does not, ask the user to authorize the specific browser, provider API, or desktop sync action needed to verify the cloud-side location.
-8. Ask whether agents may create or rely on project memory files outside Worklog, such as `AGENTS.md`, `CLAUDE.md`, `memory.md`, scratch notes, or tool-specific project docs. The default is `allow_non_worklog_project_memory: false`.
+8. Ask whether agents may create, write to, or rely on project memory files outside Worklog, such as `AGENTS.md`, `CLAUDE.md`, `memory.md`, scratch notes, or tool-specific project docs. The default is `allow_non_worklog_project_memory: false`.
 9. If the user opts into non-Worklog project memory files, warn explicitly: "Non-Worklog project memory files may contain unapproved agent-written claims and can influence later agent decisions outside the reviewed Worklog approval flow." Pass `non_worklog_project_memory_warning_acknowledged: true` only after showing that warning.
 10. As the assistant, propose a session log template and project log template that fit the user's actual project.
 11. Work with the user to refine section names, ordering, and how the assistant should author project-level rollups from reviewed session logs.
@@ -114,7 +114,7 @@ If a contributor approves a session log but lacks project-log approval permissio
 3. If the project is shared, call `worklog_sync_project` with `direction: "pull"` before resuming unless the user asks for local-only state.
 4. Call `worklog_resume_context` with the exact `project_id`.
 5. Summarize the returned context in chat and then use it as task context. If there are pending project-log updates and the current user is a project approver, call that out clearly.
-6. Treat approved Worklog session logs and project logs as the source of reviewed project truth. Do not create or rely on non-Worklog project memory files unless the resume context or approved project settings explicitly allow it; even when allowed, do not let those files override approved Worklog state.
+6. Treat approved Worklog session logs and project logs as the source of reviewed project truth. Unless the resume context or approved project settings explicitly allow it, do not create, update, append to, or otherwise write project memory into non-Worklog project memory files, and do not rely on those files as project memory. Even when allowed, do not let those files override approved Worklog state.
 
 ## Session Log Review
 
@@ -175,7 +175,8 @@ For shared projects, only a project approver should approve the project log. If 
 - When a substantive Worklog-tracked task is complete and a session log is drafted or edited, present the exact rendered session-log draft as normal chat content in the same response that reports task completion, then ask for review or explicit approval. Do not wait for a later user turn. Do not wrap the log in a fenced Markdown/code block or otherwise show raw Markdown source unless the user explicitly asks for raw Markdown. A draft ID alone is not sufficient review.
 - Treat resume context as reviewed Worklog state, not as raw event history.
 - Treat approved Worklog session logs and project logs as the source of reviewed project truth. Non-Worklog project memory files should not override them unless the user explicitly allowed that workflow during setup.
-- During Project Setup, ask whether agents may create or rely on project memory files outside Worklog. The default is `allow_non_worklog_project_memory: false`.
+- During Project Setup, ask whether agents may create, write to, or rely on project memory files outside Worklog. The default is `allow_non_worklog_project_memory: false`.
+- When `allow_non_worklog_project_memory` is false, agents must not create, update, append to, or otherwise write project memory into non-Worklog memory files.
 - If the user opts into non-Worklog project memory files, warn that those files may contain unapproved agent-written claims and could influence later agent decisions outside the reviewed Worklog approval flow.
 - Keep source events local and out of chat unless the user asks to inspect them.
 - The user's template is authoritative. Preserve their section names and format.
