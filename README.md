@@ -22,6 +22,16 @@ session becomes a user-approved session log, and project logs are updated only
 from approved session logs. Future agents can resume from the approved record
 without treating an unreviewed transcript or ad hoc note as truth.
 
+During project setup, Worklog asks whether agents may create, write to, or rely
+on project memory files outside Worklog, such as `AGENTS.md`, `CLAUDE.md`,
+`memory.md`, or tool-specific project docs. The default is `false`: approved
+Worklog session logs and project logs are the source of reviewed project truth,
+and agents must not create, update, append to, or otherwise write project
+memory into non-Worklog memory files. If the user opts into non-Worklog project
+memory files, the assistant must warn that those files may contain unapproved
+agent-written claims and can influence later agent decisions outside the
+reviewed Worklog approval flow.
+
 On teams, the missing project record shows up across people. Teams usually
 share the outputs of agent work, such as code, documents, notebooks, tickets, or
 reports, but the context behind those outputs often stays in one person's local
@@ -53,6 +63,10 @@ should be grounded in source events, approved Worklog state, validation output,
 or user-confirmed facts. Hypotheses, inferences, assumptions, suspected causes,
 and unverified experiment results or insights must be labeled explicitly in the
 log text, for example `Hypothesis:`, `Inference:`, or `Unverified result:`.
+
+Project logs are living resume state. Their titles stay stable at the project
+level; update-specific context belongs in sections such as Current State or Next
+Actions.
 
 ## Sharing
 
