@@ -33,6 +33,9 @@ required_skill_phrases = [
     "Approved Worklog session logs and project logs are the source of reviewed project truth",
     "agents must not create, update, append to, or otherwise write project memory into non-Worklog memory files",
     "Living project-log titles should stay stable at the project level",
+    "Ordinary project-log rollups are delta updates, not full rebuilds",
+    "Preserve unchanged project-log sections verbatim",
+    "Full rebuilds from all historical approved session logs are repair/audit mode",
 ]
 skill_paths = [
     repo / "skill" / "worklog.body.md",
@@ -53,6 +56,9 @@ for phrase in (
     "source of reviewed project truth",
     "unapproved agent-written claims",
     "Keep living project-log titles stable at the project level",
+    "Ordinary project-log rollups are delta updates, not full rebuilds",
+    "Preserve unchanged project-log sections verbatim",
+    "Full rebuilds from all historical approved session logs are repair/audit mode",
 ):
     if phrase not in server_text:
         raise SystemExit(f"{source} is missing required memory-policy guidance: {phrase}")
