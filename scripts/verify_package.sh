@@ -26,6 +26,8 @@ for package in packages:
 required_skill_phrases = [
     "When a substantive Worklog-tracked task is clearly complete, draft and present the session log automatically",
     "Do not merely offer to create the session log later.",
+    "Ready to log this session, or should we keep working?",
+    "ask before drafting or showing a session log",
     "The default is `allow_non_worklog_project_memory: false`.",
     "Non-Worklog project memory files may contain unapproved agent-written claims",
     "Approved Worklog session logs and project logs are the source of reviewed project truth",

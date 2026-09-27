@@ -265,8 +265,10 @@ class Server:
                 "importance, and the newest session log should not dominate merely "
                 "because it is newest. When a substantive Worklog-tracked task is "
                 "clearly complete, draft and present a session log automatically in "
-                "the same response that reports completion; ask first only if "
-                "continuation is reasonably ambiguous. When starting a project, ask about the "
+                "the same response that reports completion; when continuation is "
+                "reasonably ambiguous, ask before drafting or showing a session log, "
+                'for example: "Ready to log this session, or should we keep working?" '
+                "When starting a project, ask about the "
                 "nature of the work first, then have the LLM propose a structure; "
                 "accept custom structures. Resume context is generated from an approved "
                 "project log plus recent approved session logs. For review flows, show "
@@ -3552,7 +3554,7 @@ def schemas() -> list[dict[str, Any]]:
         ),
         schema(
             "worklog_draft_session_log",
-            "Create a source-bounded session-log draft seed. Call when the tracked task is clearly complete, the user explicitly asked to log/review the session, or the agent must stop. For a clearly complete substantive Worklog-tracked task, call automatically before the completion response instead of only offering to log later. Captures the current host transcript first by default when available, continues after the latest approved session log for the same source session/project unless explicit range arguments are provided, and returns the bounded source-event slice as private authoring context for the assistant.",
+            "Create a source-bounded session-log draft seed. Call when the tracked task is clearly complete, the user explicitly asked to log/review the session, or the agent must stop. For a clearly complete substantive Worklog-tracked task, call automatically before the completion response instead of only offering to log later. If the task may reasonably continue, ask before drafting or showing a session log instead of calling this tool, for example: \"Ready to log this session, or should we keep working?\" Captures the current host transcript first by default when available, continues after the latest approved session log for the same source session/project unless explicit range arguments are provided, and returns the bounded source-event slice as private authoring context for the assistant.",
             {
                 "session_id": {"type": "string"},
                 "project_id": {"type": "string"},
@@ -4298,7 +4300,7 @@ def require_session_log_review_reason(args: dict[str, Any]) -> str:
         "the session, or the agent must stop and preserve reviewed state. When a substantive "
         "Worklog-tracked task is clearly complete, draft and present the session log automatically "
         "instead of merely offering to log later. If the task may reasonably continue, ask the user "
-        "before drafting."
+        'before drafting or showing a session log, for example: "Ready to log this session, or should we keep working?"'
     )
 
 
@@ -4320,6 +4322,7 @@ def render_session_log_authoring_next_step() -> str:
         "Next:",
         "- The assistant should author the session log from the bounded source-event slice and the user's session-log template.",
         "- Continue session-log review because a timing gate was met: the tracked task is clearly complete, the user explicitly asked to log/review, or the agent must stop.",
+        '- If the task may reasonably continue, stop before drafting or showing a session log and ask: "Ready to log this session, or should we keep working?"',
         "- If the tracked task is clearly complete, present the session log in the same completion response instead of only offering to log later.",
         "- Separate observed facts from hypotheses, inferences, assumptions, suspected causes, and unverified results; label anything non-factual explicitly in the log text.",
         "- Before asking for approval, run a reflection pass against the source-event slice to check for missed outcomes, decisions, validation, open questions, and next actions.",

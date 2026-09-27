@@ -56,7 +56,8 @@ assistant must draft and present a session log in the completion response rather
 than merely offering to do it later. The assistant should also draft when the
 user explicitly asks to log or review the session, or when the agent must stop
 and preserve reviewed state. If the task may reasonably continue, the assistant
-should ask before drafting.
+should ask before drafting or showing a session log, for example: "Ready to log
+this session, or should we keep working?"
 
 Session and project logs must distinguish facts from hypotheses. Factual claims
 should be grounded in source events, approved Worklog state, validation output,
