@@ -263,7 +263,11 @@ class Server:
                 "draft but does not mechanically decide where facts belong. Rollups "
                 "should merge and prune durable resume state; recency is not "
                 "importance, and the newest session log should not dominate merely "
-                "because it is newest. When a substantive Worklog-tracked task is "
+                "because it is newest. Ordinary project-log rollups are delta updates, "
+                "not full rebuilds: use the latest approved project log plus pending "
+                "approved session logs, preserve unchanged sections, and reserve full "
+                "historical rebuilds for explicit repair/audit mode. When a substantive "
+                "Worklog-tracked task is "
                 "clearly complete, draft and present a session log automatically in "
                 "the same response that reports completion; when continuation is "
                 "reasonably ambiguous, ask before drafting or showing a session log, "
@@ -4392,7 +4396,9 @@ def render_project_rollup_authoring(
         "",
         "Worklog does not generate project-log rollups automatically. The assistant should write the project-log draft from the approved source material, then call `worklog_draft_project_log` again with `sections` or `fields`.",
         "",
-        "Project logs are durable resume state, not session recaps, PR changelogs, validation receipts, or audit trails. Treat approved session logs as evidence to distill from, not content to copy. Recency is not importance; a newly approved session log may produce a small project-log change or no change at all.",
+        "Project logs are durable resume state, not session recaps, PR changelogs, validation receipts, or audit trails. Treat approved session logs as evidence to distill from, not content to copy. Ordinary project-log rollups are delta updates, not full rebuilds: start from the previous approved project log and pending approved session logs, preserve unchanged sections, and add only durable deltas. Recency is not importance; a newly approved session log may produce a small project-log change or no change at all.",
+        "",
+        "Full rebuilds from all historical approved session logs are repair/audit mode. Use them only when the user explicitly asks for a full rebuild/audit, when the previous approved project log is missing or suspected corrupt, or when the approved project log no longer appears to represent the approved history.",
         "",
         "For each candidate item, ask whether a future agent would act differently because it is in the project log. If not, keep it in the session log only. Prefer replacing stale state with the current final fact over appending the story of how the state changed.",
         "",
@@ -4438,12 +4444,15 @@ def render_project_rollup_authoring(
             "Next:",
             "- Author a coherent project-log draft in the user's project-log format.",
             f"- Keep the project-log title stable at `{stable_project_log_title(project_id)}`; put update-specific context in sections such as Current State or Next Actions.",
-            "- Start from the previous approved project log as the base, then merge in only durable deltas from approved session logs.",
+            "- Start from the previous approved project log as the base, then merge in only durable deltas from pending approved session logs.",
+            "- Preserve unchanged project-log sections verbatim when there is no durable delta.",
+            "- Do not reread every historical approved session log for an ordinary rollup; reserve that for explicit repair/audit mode or a missing/suspect previous project log.",
             "- Place facts only in sections where they semantically belong.",
             "- Label hypotheses, inferences, assumptions, suspected causes, and unverified results or insights explicitly; do not promote them to durable facts.",
             "- Replace superseded theories, plans, and status with the current truth instead of carrying both old and new versions.",
             "- Omit PR mechanics, exact commands, validation receipts, local branch state, and detailed file lists unless they materially affect future resumption.",
-            "- Run a reflection pass before review: check that relevant carry-forward facts are preserved, obsolete facts are removed or updated, every pending approved session log has been considered, and the newest session log has not dominated the project log by mere recency.",
+            "- Run a reflection pass before review: compare the old and new project logs, check that relevant carry-forward facts are preserved, obsolete facts are removed or updated, every pending approved session log has been considered, and the newest session log has not dominated the project log by mere recency.",
+            "- If the newest session log caused broad rewrites without durable state changes, revise the draft before review.",
             "- Then call `worklog_draft_project_log` with `project_id`, the same `session_log_ids` if applicable, and the authored `sections` or `fields`.",
         ]
     )
@@ -4454,8 +4463,11 @@ def project_rollup_reflection_checklist() -> list[str]:
     return [
         "Compare the authored project-log draft against the previous approved project log.",
         "Preserve durable carry-forward facts that remain relevant for future resume context.",
+        "Preserve unchanged project-log sections verbatim when there is no durable delta.",
         "Update or remove stale facts instead of copying the previous project log mechanically.",
-        "Check every approved source session log supplied for durable outcomes, decisions, risks, and next actions, but do not give the newest session log special weight merely because it is newest.",
+        "Check every pending approved source session log supplied for durable outcomes, decisions, risks, and next actions, but do not give the newest session log special weight merely because it is newest.",
+        "Do not reread every historical approved session log for an ordinary rollup unless the user explicitly requested a full rebuild/audit or the previous approved project log is missing or suspected corrupt.",
+        "Reject or revise broad rewrites caused by the newest session log unless they reflect real durable state changes.",
         "For each new or changed item, ask whether a future agent would act differently because it is in the project log; otherwise keep it in the session log only.",
         "Keep the project-log title stable at the project level; put update-specific context in sections such as Current State or Next Actions.",
         "For each factual claim, identify its support in approved Worklog state, source session logs, validation output, or user-confirmed facts.",
@@ -4470,6 +4482,7 @@ def project_log_reflection_checklist() -> list[str]:
         "Review the exact project-log draft before requesting approval.",
         "Check that project-log sections contain durable resume state rather than audit-trail detail.",
         "Check for recency bias: the latest session log should not be overrepresented unless it changed durable project state.",
+        "Confirm unchanged project-log sections were preserved instead of rewritten around the newest session.",
         "Remove PR mechanics, exact commands, validation receipts, local branch state, and detailed file lists unless they materially affect future resumption.",
         "Keep the project-log title stable at the project level; put update-specific context in sections such as Current State or Next Actions.",
         "Confirm factual claims are evidence-grounded, and explicitly label hypotheses, inferences, assumptions, suspected causes, and unverified results or insights.",

@@ -65,9 +65,14 @@ or user-confirmed facts. Hypotheses, inferences, assumptions, suspected causes,
 and unverified experiment results or insights must be labeled explicitly in the
 log text, for example `Hypothesis:`, `Inference:`, or `Unverified result:`.
 
-Project logs are living resume state. Their titles stay stable at the project
-level; update-specific context belongs in sections such as Current State or Next
-Actions.
+Project logs are living resume state. Ordinary project-log rollups are delta
+updates, not full rebuilds: they start from the latest approved project log and
+pending approved session logs, preserve unchanged sections, and add only durable
+deltas. A pending session log may produce one small project-log edit or no
+project-log change at all. Full rebuilds from all historical session logs are
+reserved for explicit repair/audit mode. Project-log titles stay stable at the
+project level; update-specific context belongs in sections such as Current
+State or Next Actions.
 
 ## Sharing
 
